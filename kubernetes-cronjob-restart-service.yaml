@@ -1,0 +1,85 @@
+---
+# CronJob for Workflow Restart Service
+# Runs every 30 minutes (0.5 hours) to check for and restart failed workflows
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: workflow-restart-service
+  namespace: security-scan
+  labels:
+    app: workflow-restart-service
+spec:
+  # Run every 30 minutes (0.5 hours)
+  # Cron format: minute hour day month weekday
+  schedule: "*/30 * * * *"
+  # Keep last 3 successful jobs and 1 failed job for debugging
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  # Start deadline: if job doesn't start within 60 seconds, skip it
+  startingDeadlineSeconds: 60
+  # Concurrency policy: don't allow concurrent executions
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      # Active deadline: kill job if it runs longer than 10 minutes
+      activeDeadlineSeconds: 600
+      backoffLimit: 2  # Retry up to 2 times on failure
+      template:
+        metadata:
+          labels:
+            app: workflow-restart-service
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: restart-service
+            image: security-scan-worker:latest  # Same image as worker (contains the JAR)
+            imagePullPolicy: Always
+            command:
+            - java
+            - -cp
+            - /app/security-scan-1.0.0.jar
+            - securityscanapp.WorkflowRestartService
+            env:
+            # Temporal service connection
+            - name: TEMPORAL_ADDRESS
+              value: "temporal-service.security-scan.svc.cluster.local:7233"  # Adjust to your Temporal service
+            # Task queue to monitor
+            - name: TASK_QUEUE
+              value: "SECURITY_SCAN_TASK_QUEUE"  # Default task queue
+            # Failure types to restart: STORAGE_FAILURE, NETWORK_FAILURE, RESOURCE_EXHAUSTION, 
+            # DEPLOYMENT_FAILURE, or ALL (default: ALL to restart all restartable failures)
+            - name: FAILURE_TYPE
+              value: "ALL"
+            # Verify storage health before restarting (recommended: true)
+            - name: VERIFY_STORAGE
+              value: "true"
+            # Use new workflow IDs for restarts (recommended: true)
+            - name: USE_NEW_WORKFLOW_ID
+              value: "true"
+            # Workspace base directory (needed for storage health check)
+            - name: WORKSPACE_BASE_DIR
+              value: "/workspace/security-scans"
+            resources:
+              requests:
+                cpu: "200m"
+                memory: "512Mi"
+              limits:
+                cpu: "500m"
+                memory: "1Gi"
+            volumeMounts:
+            # Mount workspace storage to verify storage health
+            - name: workspace-storage
+              mountPath: /workspace
+              readOnly: true  # Read-only since we're just checking health
+          volumes:
+          - name: workspace-storage
+            persistentVolumeClaim:
+              claimName: security-scan-workspace
+          # Optional: Add node selector, tolerations, etc. if needed
+          # nodeSelector:
+          #   workload-type: batch
+          # tolerations:
+          # - key: "workload-type"
+          #   operator: "Equal"
+          #   value: "batch"
+          #   effect: "NoSchedule"

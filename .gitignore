@@ -1,0 +1,10 @@
+target/
+.idea/
+*.iml
+*.class
+.DS_Store
+*.log
+workspace/
+*.jar
+!target/*.jar
+

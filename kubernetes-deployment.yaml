@@ -1,0 +1,123 @@
+---
+# Note: This file contains the main deployment for security scan workers.
+# For the workflow restart service CronJob, see: kubernetes-cronjob-restart-service.yaml
+---
+# StorageClass for NFS (adjust based on your cluster)
+# If you have an existing NFS-based storage class, use that instead
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: security-scan-nfs
+provisioner: example.com/nfs  # Replace with your NFS provisioner
+parameters:
+  server: nfs-server.your-cluster.local  # Replace with your NFS server
+  path: /exports/security-scans
+allowVolumeExpansion: true
+volumeBindingMode: Immediate
+---
+# PersistentVolumeClaim - REQUIRES ReadWriteMany (RWX)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: security-scan-workspace
+  namespace: security-scan
+spec:
+  accessModes:
+    - ReadWriteMany  # CRITICAL: Must be RWX for parallel execution across pods
+  storageClassName: security-scan-nfs  # Use your RWX-capable storage class
+  resources:
+    requests:
+      storage: 100Gi  # Adjust based on your needs
+---
+# Deployment for Security Scan Workers
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: security-scan-worker
+  namespace: security-scan
+  labels:
+    app: security-scan-worker
+spec:
+  replicas: 3  # Multiple workers for load distribution
+  selector:
+    matchLabels:
+      app: security-scan-worker
+  template:
+    metadata:
+      labels:
+        app: security-scan-worker
+    spec:
+      containers:
+      - name: worker
+        image: security-scan-worker:latest  # Replace with your image
+        imagePullPolicy: Always
+        env:
+        - name: TEMPORAL_ADDRESS
+          value: "temporal-service.security-scan.svc.cluster.local:7233"  # Adjust to your Temporal service
+        - name: WORKSPACE_BASE_DIR
+          value: "/workspace/security-scans"
+        # TASK_QUEUES: Comma-separated list of queues to poll (default: all queues)
+        # Examples:
+        #   - Poll all queues: "SECURITY_SCAN_TASK_QUEUE,SECURITY_SCAN_TASK_QUEUE_LONG_RUNNING,SECURITY_SCAN_TASK_QUEUE_PRIORITY"
+        #   - Poll only default: "SECURITY_SCAN_TASK_QUEUE"
+        #   - Poll default and priority: "SECURITY_SCAN_TASK_QUEUE,SECURITY_SCAN_TASK_QUEUE_PRIORITY"
+        # If not set, worker polls all queues by default
+        # - name: TASK_QUEUES
+        #   value: "SECURITY_SCAN_TASK_QUEUE,SECURITY_SCAN_TASK_QUEUE_LONG_RUNNING,SECURITY_SCAN_TASK_QUEUE_PRIORITY"
+        resources:
+          requests:
+            cpu: "1000m"
+            memory: "2Gi"
+          limits:
+            cpu: "2000m"
+            memory: "4Gi"
+        volumeMounts:
+        - name: workspace-storage
+          mountPath: /workspace
+        livenessProbe:
+          exec:
+            command:
+            - pgrep
+            - -f
+            - security-scan.jar
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        readinessProbe:
+          exec:
+            command:
+            - pgrep
+            - -f
+            - security-scan.jar
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      volumes:
+      - name: workspace-storage
+        persistentVolumeClaim:
+          claimName: security-scan-workspace
+---
+# ConfigMap for non-sensitive configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: security-scan-config
+  namespace: security-scan
+data:
+  # Add any other configuration here
+---
+# Secret for sensitive configuration
+apiVersion: v1
+kind: Secret
+metadata:
+  name: security-scan-secrets
+  namespace: security-scan
+type: Opaque
+stringData:
+  git-token: "your-git-token"  # Replace with actual token
+  blackduck-token: "your-blackduck-token"  # Replace with actual token
+---
+# Namespace (create if it doesn't exist)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: security-scan
+
