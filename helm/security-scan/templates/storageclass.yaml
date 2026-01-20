@@ -1,0 +1,13 @@
+{{- if .Values.storage.storageClass.create }}
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .Values.storage.storageClass.name }}
+  labels:
+    {{- include "security-scan.labels" . | nindent 4 }}
+provisioner: {{ .Values.storage.storageClass.provisioner }}
+parameters:
+  {{- toYaml .Values.storage.storageClass.parameters | nindent 2 }}
+allowVolumeExpansion: {{ .Values.storage.storageClass.allowVolumeExpansion }}
+volumeBindingMode: {{ .Values.storage.storageClass.volumeBindingMode }}
+{{- end }}

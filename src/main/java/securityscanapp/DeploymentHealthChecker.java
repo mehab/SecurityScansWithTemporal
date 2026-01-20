@@ -111,14 +111,8 @@ public class DeploymentHealthChecker {
             );
         }
         
-        // Check Gitleaks
-        if (!isCommandAvailable("gitleaks")) {
-            throw new DeploymentFailureException(
-                "Gitleaks command is not available",
-                "CLI tool missing",
-                "Gitleaks is required for secrets scanning"
-            );
-        }
+        // Note: Gitleaks has been removed from the application
+        // Future scan types can be checked here
         
         // Check BlackDuck Detect script
         Path detectScript = Paths.get("/usr/local/bin/detect.sh");

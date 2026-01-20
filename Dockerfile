@@ -11,14 +11,6 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Gitleaks
-# Update version as needed
-ARG GITLEAKS_VERSION=8.18.0
-RUN wget -qO- https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz | tar xz && \
-    mv gitleaks /usr/local/bin/ && \
-    chmod +x /usr/local/bin/gitleaks && \
-    gitleaks version
-
 # Install BlackDuck Detect
 # The detect script will download the actual detect jar on first run
 RUN curl -L https://detect.synopsys.com/detect.sh -o /usr/local/bin/detect.sh && \

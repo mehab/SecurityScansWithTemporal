@@ -1,0 +1,19 @@
+# Development environment values
+# Usage: helm install security-scan ./helm/security-scan -f values-dev.yaml
+
+temporal:
+  address: "temporal-dev.example.com:7233"
+
+storage:
+  storageClass:
+    create: false
+  pvc:
+    storageClassName: nfs-client
+    size: 50Gi
+
+workers:
+  blackduck:
+    replicas: 1
+
+restartService:
+  schedule: "*/60 * * * *"  # Run every hour in dev

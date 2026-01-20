@@ -55,7 +55,7 @@ public class RepositoryActivityImpl implements RepositoryActivity {
             
             // Calculate minimum required space:
             // - Repository clone (estimated based on config)
-            // - CLI tools (Gitleaks + BlackDuck Detect JAR)
+            // - CLI tools (BlackDuck Detect JAR)
             // - Scan outputs (reports, logs)
             // - Temporary files during operations
             long estimatedRepoSize = estimateRepositorySize(request, config);

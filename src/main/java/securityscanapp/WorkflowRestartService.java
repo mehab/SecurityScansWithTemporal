@@ -14,7 +14,7 @@ package securityscanapp;
  * Environment variables:
  *   TEMPORAL_ADDRESS - Temporal service address (default: localhost:7233)
  *   TASK_QUEUES - Comma-separated list of task queues to monitor 
- *                 (default: all scan-type queues - GITLEAKS, BLACKDUCK, DEFAULT)
+ *                 (default: all scan-type queues - BLACKDUCK, DEFAULT)
  *   FAILURE_TYPE - Type of failures to restart: STORAGE_FAILURE, NETWORK_FAILURE, 
  *                  RESOURCE_EXHAUSTION, DEPLOYMENT_FAILURE, or ALL (default: ALL)
  *   VERIFY_STORAGE - Verify storage health before restarting (default: true)
@@ -38,9 +38,8 @@ public class WorkflowRestartService {
                 taskQueues[i] = taskQueues[i].trim();
             }
         } else {
-            // Default: monitor all scan-type queues
+            // Default: monitor all scan-type queues (structure supports adding new scan types in the future)
             taskQueues = new String[]{
-                Shared.TASK_QUEUE_GITLEAKS,
                 Shared.TASK_QUEUE_BLACKDUCK,
                 Shared.SECURITY_SCAN_TASK_QUEUE_DEFAULT
             };

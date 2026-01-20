@@ -7,7 +7,7 @@ package securityscanapp;
  * - Application ID: Identifies the application
  * - Component: Component within the application
  * - Build ID: Unique build identifier for the component
- * - Tool Type: Single scan type (Gitleaks, BlackDuck, etc.)
+ * - Tool Type: Single scan type (BlackDuck, etc.)
  * 
  * Workflow ID format: {appId}-{component}-{buildId}-{toolType}
  */
@@ -15,7 +15,7 @@ public class ScanRequest {
     private String appId; // Application ID
     private String component; // Component name
     private String buildId; // Build ID (unique per component build)
-    private ScanType toolType; // Single scan tool type (Gitleaks, BlackDuck, etc.)
+    private ScanType toolType; // Single scan tool type (BlackDuck, etc.)
     
     private String scanId; // Generated from appId-component-buildId-toolType
     private String repositoryUrl;

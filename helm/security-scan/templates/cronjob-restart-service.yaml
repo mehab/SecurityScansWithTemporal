@@ -1,0 +1,80 @@
+{{- if .Values.restartService.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: workflow-restart-service
+  namespace: {{ include "security-scan.namespace" . }}
+  labels:
+    {{- include "security-scan.labels" . | nindent 4 }}
+    app: workflow-restart-service
+    {{- with .Values.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  schedule: {{ .Values.restartService.schedule | quote }}
+  successfulJobsHistoryLimit: {{ .Values.restartService.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.restartService.failedJobsHistoryLimit }}
+  startingDeadlineSeconds: {{ .Values.restartService.startingDeadlineSeconds }}
+  concurrencyPolicy: {{ .Values.restartService.concurrencyPolicy }}
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: {{ .Values.restartService.activeDeadlineSeconds }}
+      backoffLimit: {{ .Values.restartService.backoffLimit }}
+      template:
+        metadata:
+          labels:
+            {{- include "security-scan.labels" . | nindent 12 }}
+            app: workflow-restart-service
+        spec:
+          {{- with .Values.podSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.restartService.nodeSelector }}
+          nodeSelector:
+            {{- toYaml .Values.restartService.nodeSelector | nindent 12 }}
+          {{- end }}
+          {{- if .Values.restartService.tolerations }}
+          tolerations:
+            {{- toYaml .Values.restartService.tolerations | nindent 12 }}
+          {{- end }}
+          restartPolicy: OnFailure
+          containers:
+          - name: restart-service
+            image: "{{ .Values.restartService.image.repository }}:{{ .Values.restartService.image.tag }}"
+            imagePullPolicy: {{ .Values.restartService.image.pullPolicy }}
+            {{- with .Values.securityContext }}
+            securityContext:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+            command:
+            - java
+            - -cp
+            - /app/security-scan-1.0.0.jar
+            - securityscanapp.WorkflowRestartService
+            env:
+            - name: TEMPORAL_ADDRESS
+              value: {{ include "security-scan.temporalAddress" . | quote }}
+            {{- if .Values.restartService.env.taskQueues }}
+            - name: TASK_QUEUE
+              value: {{ .Values.restartService.env.taskQueues | quote }}
+            {{- end }}
+            - name: FAILURE_TYPE
+              value: {{ .Values.restartService.env.failureType | default "ALL" | quote }}
+            - name: VERIFY_STORAGE
+              value: {{ .Values.restartService.env.verifyStorage | default "true" | quote }}
+            - name: USE_NEW_WORKFLOW_ID
+              value: {{ .Values.restartService.env.useNewWorkflowId | default "true" | quote }}
+            - name: WORKSPACE_BASE_DIR
+              value: {{ include "security-scan.workspaceBaseDir" . | quote }}
+            resources:
+              {{- toYaml .Values.restartService.resources | nindent 14 }}
+            volumeMounts:
+            - name: workspace-storage
+              mountPath: /workspace
+              readOnly: true
+          volumes:
+          - name: workspace-storage
+            persistentVolumeClaim:
+              claimName: {{ .Values.storage.pvc.name }}
+{{- end }}

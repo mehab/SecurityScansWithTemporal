@@ -60,9 +60,6 @@ public class SecurityScanWorkflowImpl implements SecurityScanWorkflow {
         Workflow.newActivityStub(RepositoryActivity.class, repositoryActivityOptions);
     
     // Activity stubs with default options (can be overridden per request)
-    private final GitleaksScanActivity gitleaksActivity = 
-        Workflow.newActivityStub(GitleaksScanActivity.class, defaultScanActivityOptions);
-    
     private final BlackDuckScanActivity blackduckActivity = 
         Workflow.newActivityStub(BlackDuckScanActivity.class, defaultScanActivityOptions);
     
@@ -156,18 +153,9 @@ public class SecurityScanWorkflowImpl implements SecurityScanWorkflow {
                     
                     // Store individual report files if configured
                     if (config.getStorageConfig().isStoreReportFiles()) {
-                        // Store Gitleaks reports
+                        // Store BlackDuck reports
                         for (ScanResult result : scanResults) {
-                            if (result.getScanType() == ScanType.GITLEAKS_SECRETS || 
-                                result.getScanType() == ScanType.GITLEAKS_FILE_HASH) {
-                                String reportPath = request.getWorkspacePath() + "/gitleaks-report.json";
-                                storageActivity.storeReportFile(
-                                    request.getScanId(),
-                                    reportPath,
-                                    "gitleaks-" + result.getScanType().getId(),
-                                    config.getStorageConfig()
-                                );
-                            } else if (result.getScanType() == ScanType.BLACKDUCK_DETECT) {
+                            if (result.getScanType() == ScanType.BLACKDUCK_DETECT) {
                                 String reportPath = request.getWorkspacePath() + "/blackduck-output";
                                 storageActivity.storeReportFile(
                                     request.getScanId(),
@@ -278,22 +266,14 @@ public class SecurityScanWorkflowImpl implements SecurityScanWorkflow {
             : Shared.SCAN_TIMEOUT_SECONDS;
         
         // Create activity stub with custom timeout if different from default
-        GitleaksScanActivity gitleaksStub = gitleaksActivity;
         BlackDuckScanActivity blackduckStub = blackduckActivity;
         
         if (timeoutSeconds != Shared.SCAN_TIMEOUT_SECONDS) {
             ActivityOptions customOptions = createScanActivityOptions(timeoutSeconds);
-            gitleaksStub = Workflow.newActivityStub(GitleaksScanActivity.class, customOptions);
             blackduckStub = Workflow.newActivityStub(BlackDuckScanActivity.class, customOptions);
         }
         
         switch (scanType) {
-            case GITLEAKS_SECRETS:
-                return gitleaksStub.scanSecrets(repoPath, config);
-                
-            case GITLEAKS_FILE_HASH:
-                return gitleaksStub.scanFileHash(repoPath, config);
-                
             case BLACKDUCK_DETECT:
                 // Pass the full request to BlackDuck activity (includes BlackDuckConfig)
                 return blackduckStub.scanSignatures(repoPath, request);

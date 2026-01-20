@@ -65,7 +65,7 @@ public class SecurityScanWorker {
                 System.out.println("Worker configured for scan type: " + scanType);
             } catch (IllegalArgumentException e) {
                 System.err.println("Invalid SCAN_TYPE: " + scanTypeEnv);
-                System.err.println("Valid values: GITLEAKS_SECRETS, GITLEAKS_FILE_HASH, BLACKDUCK_DETECT");
+                System.err.println("Valid values: BLACKDUCK_DETECT");
                 System.err.println("Falling back to default queue");
                 taskQueue = Shared.SECURITY_SCAN_TASK_QUEUE_DEFAULT;
             }
@@ -87,9 +87,8 @@ public class SecurityScanWorker {
             System.out.println("Security Scan Worker started");
             System.out.println("Task Queue: " + taskQueue);
         } else {
-            // Poll all scan-type queues (for backward compatibility or multi-type worker)
+            // Poll all scan-type queues (structure supports adding new scan types in the future)
             String[] taskQueues = new String[]{
-                Shared.TASK_QUEUE_GITLEAKS,
                 Shared.TASK_QUEUE_BLACKDUCK,
                 Shared.SECURITY_SCAN_TASK_QUEUE_DEFAULT  // Fallback
             };
@@ -110,9 +109,9 @@ public class SecurityScanWorker {
         System.out.println();
         System.out.println("Configuration:");
         System.out.println("  - Set SCAN_TYPE environment variable to dedicate worker to a scan type");
-        System.out.println("    Example: SCAN_TYPE=GITLEAKS_SECRETS");
+        System.out.println("    Example: SCAN_TYPE=BLACKDUCK_DETECT");
         System.out.println("  - Or set TASK_QUEUE to specify a custom queue");
-        System.out.println("    Example: TASK_QUEUE=SECURITY_SCAN_TASK_QUEUE_GITLEAKS");
+        System.out.println("    Example: TASK_QUEUE=SECURITY_SCAN_TASK_QUEUE_BLACKDUCK");
         
         // Start all registered workers
         factory.start();
@@ -128,7 +127,6 @@ public class SecurityScanWorker {
         // Register activity implementations
         worker.registerActivitiesImplementations(
             new RepositoryActivityImpl(),
-            new GitleaksScanActivityImpl(),
             new BlackDuckScanActivityImpl(),
             new StorageActivityImpl()
         );

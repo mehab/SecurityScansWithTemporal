@@ -2,10 +2,11 @@ package securityscanapp;
 
 /**
  * Enumeration of supported security scan types
+ * 
+ * Structure is designed to support multiple scan types.
+ * Currently only BlackDuck Detect is implemented.
  */
 public enum ScanType {
-    GITLEAKS_SECRETS("gitleaks-secrets", "Gitleaks secrets scanning"),
-    GITLEAKS_FILE_HASH("gitleaks-file-hash", "Gitleaks file hash scanning"),
     BLACKDUCK_DETECT("blackduck-detect", "BlackDuck Detect signature scanning");
     
     private final String id;

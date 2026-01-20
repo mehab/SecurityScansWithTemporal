@@ -14,18 +14,16 @@ public interface Shared {
     static final long MAX_WORKSPACE_SIZE_BYTES = 10L * 1024 * 1024 * 1024;
     
     // CLI tool size estimates (for space calculations)
-    static final long GITLEAKS_BINARY_SIZE = 30L * 1024 * 1024; // ~30MB
     static final long BLACKDUCK_DETECT_JAR_SIZE = 100L * 1024 * 1024; // ~100MB (downloaded on first run)
     static final long BLACKDUCK_DETECT_SCRIPT_SIZE = 10L * 1024; // ~10KB
-    static final long TOTAL_CLI_TOOLS_SIZE = GITLEAKS_BINARY_SIZE + BLACKDUCK_DETECT_JAR_SIZE + 
-                                               BLACKDUCK_DETECT_SCRIPT_SIZE; // ~130MB
+    static final long TOTAL_CLI_TOOLS_SIZE = BLACKDUCK_DETECT_JAR_SIZE + 
+                                               BLACKDUCK_DETECT_SCRIPT_SIZE; // ~110MB
     
     // Activity timeouts
     static final int CLONE_TIMEOUT_SECONDS = 600; // 10 minutes for large repos
     static final int SCAN_TIMEOUT_SECONDS = 1800; // 30 minutes for scans (default)
     
     // Task queue names for scan type-based routing (one queue per tool type)
-    static final String TASK_QUEUE_GITLEAKS = "SECURITY_SCAN_TASK_QUEUE_GITLEAKS";
     static final String TASK_QUEUE_BLACKDUCK = "SECURITY_SCAN_TASK_QUEUE_BLACKDUCK";
     
     // Default fallback queue (used if scan type is not recognized)
@@ -34,6 +32,8 @@ public interface Shared {
     /**
      * Get task queue name for a specific scan type
      * Each scan type (tool type) has its own dedicated queue
+     * 
+     * Structure supports adding new scan types in the future
      */
     static String getTaskQueueForScanType(ScanType scanType) {
         if (scanType == null) {
@@ -41,9 +41,6 @@ public interface Shared {
         }
         
         switch (scanType) {
-            case GITLEAKS_SECRETS:
-            case GITLEAKS_FILE_HASH:
-                return TASK_QUEUE_GITLEAKS;
             case BLACKDUCK_DETECT:
                 return TASK_QUEUE_BLACKDUCK;
             default:

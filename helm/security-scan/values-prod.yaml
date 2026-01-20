@@ -1,0 +1,59 @@
+# Production environment values
+# Usage: helm install security-scan ./helm/security-scan -f values-prod.yaml
+
+temporal:
+  address: "temporal-prod.example.com:7233"
+
+storage:
+  storageClass:
+    create: false
+  pvc:
+    storageClassName: nfs-production
+    size: 500Gi
+
+workers:
+  blackduck:
+    replicas: 3
+    resources:
+      requests:
+        cpu: "2000m"
+        memory: "4Gi"
+      limits:
+        cpu: "4000m"
+        memory: "8Gi"
+
+restartService:
+  schedule: "*/15 * * * *"  # Run every 15 minutes in prod
+  env:
+    failureType: "ALL"
+    verifyStorage: "true"
+    useNewWorkflowId: "true"
+
+# Production security settings
+podSecurityContext:
+  fsGroup: 2000
+  runAsNonRoot: true
+  runAsUser: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false
+  runAsNonRoot: true
+  runAsUser: 1000
+
+# Use external secret management in production
+secret:
+  enabled: false  # Use External Secrets Operator or similar
+
+# Node selector for production workloads
+restartService:
+  nodeSelector:
+    workload-type: batch
+  tolerations:
+    - key: "workload-type"
+      operator: "Equal"
+      value: "batch"
+      effect: "NoSchedule"

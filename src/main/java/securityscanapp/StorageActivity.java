@@ -23,7 +23,7 @@ public interface StorageActivity {
      * Store individual scan report files to external storage
      * @param scanId Scan ID
      * @param reportPath Local path to report file
-     * @param reportType Type of report (gitleaks, blackduck, etc.)
+     * @param reportType Type of report (blackduck, etc.)
      * @param config Storage configuration
      * @return Storage path where report was stored
      */

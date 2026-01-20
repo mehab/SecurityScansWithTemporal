@@ -31,72 +31,8 @@ spec:
 ---
 # Deployment for Security Scan Workers
 # Each scan type (tool type) has its own dedicated worker deployment
+# Note: Gitleaks workers have been removed - only BlackDuck workers are deployed
 
-# Worker for Gitleaks scans
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: security-scan-worker-gitleaks
-  namespace: security-scan
-  labels:
-    app: security-scan-worker
-    scan-type: gitleaks
-spec:
-  replicas: 3  # Multiple workers for load distribution
-  selector:
-    matchLabels:
-      app: security-scan-worker
-      scan-type: gitleaks
-  template:
-    metadata:
-      labels:
-        app: security-scan-worker
-        scan-type: gitleaks
-    spec:
-      containers:
-      - name: worker
-        image: security-scan-worker:latest  # Replace with your image
-        imagePullPolicy: Always
-        env:
-        - name: TEMPORAL_ADDRESS
-          value: "temporal-service.security-scan.svc.cluster.local:7233"  # Adjust to your Temporal service
-        - name: WORKSPACE_BASE_DIR
-          value: "/workspace/security-scans"
-        # SCAN_TYPE: Dedicates this worker to a specific scan type
-        # This worker will poll SECURITY_SCAN_TASK_QUEUE_GITLEAKS
-        - name: SCAN_TYPE
-          value: "GITLEAKS_SECRETS"  # Or GITLEAKS_FILE_HASH - both use GITLEAKS queue
-        resources:
-          requests:
-            cpu: "1000m"
-            memory: "2Gi"
-          limits:
-            cpu: "2000m"
-            memory: "4Gi"
-        volumeMounts:
-        - name: workspace-storage
-          mountPath: /workspace
-        livenessProbe:
-          exec:
-            command:
-            - pgrep
-            - -f
-            - security-scan.jar
-          initialDelaySeconds: 60
-          periodSeconds: 30
-        readinessProbe:
-          exec:
-            command:
-            - pgrep
-            - -f
-            - security-scan.jar
-          initialDelaySeconds: 30
-          periodSeconds: 10
-      volumes:
-      - name: workspace-storage
-        persistentVolumeClaim:
-          claimName: security-scan-workspace
----
 # Worker for BlackDuck scans
 apiVersion: apps/v1
 kind: Deployment

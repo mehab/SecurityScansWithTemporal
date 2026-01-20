@@ -100,7 +100,7 @@ public class SecurityScanClient {
             "app-123",                    // Application ID
             "component-api",              // Component name
             "build-456",                  // Build ID
-            ScanType.GITLEAKS_SECRETS,    // Tool type (single scan type per request)
+                        ScanType.BLACKDUCK_DETECT,    // Tool type (single scan type per request)
             "https://github.com/example/repo.git",
             "main",
             "abc123def456"                // Commit SHA

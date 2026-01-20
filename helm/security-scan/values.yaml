@@ -1,0 +1,200 @@
+# Default values for security-scan
+# This is a YAML-formatted file.
+
+# Global settings
+global:
+  namespace: security-scan
+  createNamespace: true
+
+# Temporal service configuration
+temporal:
+  address: "temporal-service.security-scan.svc.cluster.local:7233"
+  # Or use external address:
+  # address: "temporal.example.com:7233"
+
+# Storage configuration
+storage:
+  # Storage class configuration
+  storageClass:
+    create: false  # Set to true if you want to create a StorageClass
+    name: security-scan-nfs
+    provisioner: example.com/nfs  # Replace with your NFS provisioner
+    parameters:
+      server: nfs-server.your-cluster.local  # Replace with your NFS server
+      path: /exports/security-scans
+    allowVolumeExpansion: true
+    volumeBindingMode: Immediate
+  
+  # Persistent Volume Claim configuration
+  pvc:
+    create: true
+    name: security-scan-workspace
+    storageClassName: security-scan-nfs  # Use your RWX-capable storage class
+    size: 100Gi
+    accessModes:
+      - ReadWriteMany  # CRITICAL: Must be RWX for parallel execution
+
+# Worker configuration
+workers:
+  # Common worker settings
+  common:
+    image:
+      repository: security-scan-worker
+      tag: latest
+      pullPolicy: Always
+    
+    workspaceBaseDir: "/workspace/security-scans"
+    
+    resources:
+      requests:
+        cpu: "1000m"
+        memory: "2Gi"
+      limits:
+        cpu: "2000m"
+        memory: "4Gi"
+    
+    livenessProbe:
+      enabled: true
+      initialDelaySeconds: 60
+      periodSeconds: 30
+      exec:
+        command:
+          - pgrep
+          - -f
+          - security-scan.jar
+    
+    readinessProbe:
+      enabled: true
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      exec:
+        command:
+          - pgrep
+          - -f
+          - security-scan.jar
+  
+  # BlackDuck worker configuration
+  blackduck:
+    enabled: true
+    replicas: 2
+    scanType: "BLACKDUCK_DETECT"
+    resources:
+      requests:
+        cpu: "1000m"
+        memory: "2Gi"
+      limits:
+        cpu: "2000m"
+        memory: "4Gi"
+
+# Workflow Restart Service configuration
+restartService:
+  enabled: true
+  
+  # CronJob schedule (runs every 30 minutes by default)
+  schedule: "*/30 * * * *"
+  
+  # Job history limits
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  
+  # Job configuration
+  startingDeadlineSeconds: 60
+  concurrencyPolicy: Forbid  # Don't allow concurrent executions
+  activeDeadlineSeconds: 600  # Kill job if it runs longer than 10 minutes
+  backoffLimit: 2  # Retry up to 2 times on failure
+  
+  # Container configuration
+  image:
+    repository: security-scan-worker
+    tag: latest
+    pullPolicy: Always
+  
+  # Environment variables
+  env:
+    # Task queues to monitor (comma-separated)
+    # If not set, monitors all scan-type queues by default
+            # taskQueues: "SECURITY_SCAN_TASK_QUEUE_BLACKDUCK"
+    
+    # Failure types to restart: STORAGE_FAILURE, NETWORK_FAILURE, RESOURCE_EXHAUSTION,
+    # DEPLOYMENT_FAILURE, or ALL (default: ALL)
+    failureType: "ALL"
+    
+    # Verify storage health before restarting (recommended: true)
+    verifyStorage: "true"
+    
+    # Use new workflow IDs for restarts (recommended: true)
+    useNewWorkflowId: "true"
+  
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "512Mi"
+    limits:
+      cpu: "500m"
+      memory: "1Gi"
+  
+  # Node selector (optional)
+  nodeSelector: {}
+  # Example:
+  # nodeSelector:
+  #   workload-type: batch
+  
+  # Tolerations (optional)
+  tolerations: []
+  # Example:
+  # tolerations:
+  #   - key: "workload-type"
+  #     operator: "Equal"
+  #     value: "batch"
+  #     effect: "NoSchedule"
+
+# ConfigMap configuration
+configMap:
+  enabled: true
+  name: security-scan-config
+  data: {}
+  # Example:
+  # data:
+  #   config.yaml: |
+  #     key: value
+
+# Secret configuration
+secret:
+  enabled: true
+  name: security-scan-secrets
+  type: Opaque
+  stringData: {}
+  # Example:
+  # stringData:
+  #   git-token: "your-git-token"
+  #   blackduck-token: "your-blackduck-token"
+  # 
+  # In production, use external secret management:
+  # - Kubernetes External Secrets Operator
+  # - Sealed Secrets
+  # - Vault
+  # - Cloud provider secret managers
+
+# Labels and annotations
+labels: {}
+annotations: {}
+
+# Pod security context (optional)
+podSecurityContext: {}
+# Example:
+# podSecurityContext:
+#   fsGroup: 2000
+#   runAsNonRoot: true
+#   runAsUser: 1000
+
+# Container security context (optional)
+securityContext: {}
+# Example:
+# securityContext:
+#   allowPrivilegeEscalation: false
+#   capabilities:
+#     drop:
+#       - ALL
+#   readOnlyRootFilesystem: false
+#   runAsNonRoot: true
+#   runAsUser: 1000

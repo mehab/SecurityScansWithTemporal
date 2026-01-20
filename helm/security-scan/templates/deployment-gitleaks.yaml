@@ -1,0 +1,65 @@
+{{- if false }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: security-scan-worker-gitleaks
+  namespace: {{ include "security-scan.namespace" . }}
+  labels:
+    {{- include "security-scan.workerSelectorLabels" . | nindent 4 }}
+    scan-type: gitleaks
+    {{- with .Values.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  replicas: {{ .Values.workers.gitleaks.replicas }}
+  selector:
+    matchLabels:
+      {{- include "security-scan.workerSelectorLabels" . | nindent 6 }}
+      scan-type: gitleaks
+  template:
+    metadata:
+      labels:
+        {{- include "security-scan.workerSelectorLabels" . | nindent 8 }}
+        scan-type: gitleaks
+    spec:
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: worker
+        image: "{{ .Values.workers.common.image.repository }}:{{ .Values.workers.common.image.tag }}"
+        imagePullPolicy: {{ .Values.workers.common.image.pullPolicy }}
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        env:
+        - name: TEMPORAL_ADDRESS
+          value: {{ include "security-scan.temporalAddress" . | quote }}
+        - name: WORKSPACE_BASE_DIR
+          value: {{ include "security-scan.workspaceBaseDir" . | quote }}
+        - name: SCAN_TYPE
+          value: {{ .Values.workers.gitleaks.scanType | quote }}
+        resources:
+          {{- toYaml (.Values.workers.gitleaks.resources | default .Values.workers.common.resources) | nindent 10 }}
+        volumeMounts:
+        - name: workspace-storage
+          mountPath: /workspace
+        {{- if .Values.workers.common.livenessProbe.enabled }}
+        livenessProbe:
+          {{- toYaml .Values.workers.common.livenessProbe.exec | nindent 10 }}
+          initialDelaySeconds: {{ .Values.workers.common.livenessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.workers.common.livenessProbe.periodSeconds }}
+        {{- end }}
+        {{- if .Values.workers.common.readinessProbe.enabled }}
+        readinessProbe:
+          {{- toYaml .Values.workers.common.readinessProbe.exec | nindent 10 }}
+          initialDelaySeconds: {{ .Values.workers.common.readinessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.workers.common.readinessProbe.periodSeconds }}
+        {{- end }}
+      volumes:
+      - name: workspace-storage
+        persistentVolumeClaim:
+          claimName: {{ .Values.storage.pvc.name }}
+{{- end }}

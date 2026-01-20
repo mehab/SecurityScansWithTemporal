@@ -1,0 +1,16 @@
+{{- if .Values.storage.pvc.create }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.storage.pvc.name }}
+  namespace: {{ include "security-scan.namespace" . }}
+  labels:
+    {{- include "security-scan.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml .Values.storage.pvc.accessModes | nindent 4 }}
+  storageClassName: {{ .Values.storage.pvc.storageClassName }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.pvc.size }}
+{{- end }}

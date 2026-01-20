@@ -1,0 +1,17 @@
+apiVersion: v2
+name: security-scan
+description: A Helm chart for Security Scan application with Temporal workflows
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - security
+  - scanning
+  - temporal
+  - workflows
+  - blackduck
+maintainers:
+  - name: Security Scan Team
+home: https://github.com/your-org/security-scan
+sources:
+  - https://github.com/your-org/security-scan
