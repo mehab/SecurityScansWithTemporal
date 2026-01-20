@@ -24,9 +24,31 @@ public interface Shared {
     static final int CLONE_TIMEOUT_SECONDS = 600; // 10 minutes for large repos
     static final int SCAN_TIMEOUT_SECONDS = 1800; // 30 minutes for scans (default)
     
-    // Task queue names for bottleneck prevention
+    // Task queue names for scan type-based routing (one queue per tool type)
+    static final String TASK_QUEUE_GITLEAKS = "SECURITY_SCAN_TASK_QUEUE_GITLEAKS";
+    static final String TASK_QUEUE_BLACKDUCK = "SECURITY_SCAN_TASK_QUEUE_BLACKDUCK";
+    
+    // Default fallback queue (used if scan type is not recognized)
     static final String SECURITY_SCAN_TASK_QUEUE_DEFAULT = "SECURITY_SCAN_TASK_QUEUE";
-    static final String SECURITY_SCAN_TASK_QUEUE_LONG_RUNNING = "SECURITY_SCAN_TASK_QUEUE_LONG_RUNNING";
-    static final String SECURITY_SCAN_TASK_QUEUE_PRIORITY = "SECURITY_SCAN_TASK_QUEUE_PRIORITY";
+    
+    /**
+     * Get task queue name for a specific scan type
+     * Each scan type (tool type) has its own dedicated queue
+     */
+    static String getTaskQueueForScanType(ScanType scanType) {
+        if (scanType == null) {
+            return SECURITY_SCAN_TASK_QUEUE_DEFAULT;
+        }
+        
+        switch (scanType) {
+            case GITLEAKS_SECRETS:
+            case GITLEAKS_FILE_HASH:
+                return TASK_QUEUE_GITLEAKS;
+            case BLACKDUCK_DETECT:
+                return TASK_QUEUE_BLACKDUCK;
+            default:
+                return SECURITY_SCAN_TASK_QUEUE_DEFAULT;
+        }
+    }
 }
 

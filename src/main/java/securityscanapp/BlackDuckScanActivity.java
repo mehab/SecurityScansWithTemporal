@@ -11,11 +11,17 @@ public interface BlackDuckScanActivity {
     
     /**
      * Perform BlackDuck Detect signature scan
-     * @param repoPath Path to the repository to scan
-     * @param config Scan configuration
+     * 
+     * This method:
+     * 1. Determines the appropriate BlackDuck Hub URL
+     * 2. Executes the detect shell script with proper parameters
+     * 3. Handles rapid scan vs regular scan results
+     * 
+     * @param repoPath Path to the cloned repository to scan
+     * @param request Scan request containing BlackDuck configuration
      * @return Scan result
      */
     @ActivityMethod
-    ScanResult scanSignatures(String repoPath, ScanConfig config);
+    ScanResult scanSignatures(String repoPath, ScanRequest request);
 }
 

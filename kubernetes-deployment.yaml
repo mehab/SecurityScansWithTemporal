@@ -30,22 +30,28 @@ spec:
       storage: 100Gi  # Adjust based on your needs
 ---
 # Deployment for Security Scan Workers
+# Each scan type (tool type) has its own dedicated worker deployment
+
+# Worker for Gitleaks scans
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: security-scan-worker
+  name: security-scan-worker-gitleaks
   namespace: security-scan
   labels:
     app: security-scan-worker
+    scan-type: gitleaks
 spec:
   replicas: 3  # Multiple workers for load distribution
   selector:
     matchLabels:
       app: security-scan-worker
+      scan-type: gitleaks
   template:
     metadata:
       labels:
         app: security-scan-worker
+        scan-type: gitleaks
     spec:
       containers:
       - name: worker
@@ -56,14 +62,105 @@ spec:
           value: "temporal-service.security-scan.svc.cluster.local:7233"  # Adjust to your Temporal service
         - name: WORKSPACE_BASE_DIR
           value: "/workspace/security-scans"
-        # TASK_QUEUES: Comma-separated list of queues to poll (default: all queues)
-        # Examples:
-        #   - Poll all queues: "SECURITY_SCAN_TASK_QUEUE,SECURITY_SCAN_TASK_QUEUE_LONG_RUNNING,SECURITY_SCAN_TASK_QUEUE_PRIORITY"
-        #   - Poll only default: "SECURITY_SCAN_TASK_QUEUE"
-        #   - Poll default and priority: "SECURITY_SCAN_TASK_QUEUE,SECURITY_SCAN_TASK_QUEUE_PRIORITY"
-        # If not set, worker polls all queues by default
-        # - name: TASK_QUEUES
-        #   value: "SECURITY_SCAN_TASK_QUEUE,SECURITY_SCAN_TASK_QUEUE_LONG_RUNNING,SECURITY_SCAN_TASK_QUEUE_PRIORITY"
+        # SCAN_TYPE: Dedicates this worker to a specific scan type
+        # This worker will poll SECURITY_SCAN_TASK_QUEUE_GITLEAKS
+        - name: SCAN_TYPE
+          value: "GITLEAKS_SECRETS"  # Or GITLEAKS_FILE_HASH - both use GITLEAKS queue
+        resources:
+          requests:
+            cpu: "1000m"
+            memory: "2Gi"
+          limits:
+            cpu: "2000m"
+            memory: "4Gi"
+        volumeMounts:
+        - name: workspace-storage
+          mountPath: /workspace
+        livenessProbe:
+          exec:
+            command:
+            - pgrep
+            - -f
+            - security-scan.jar
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        readinessProbe:
+          exec:
+            command:
+            - pgrep
+            - -f
+            - security-scan.jar
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      volumes:
+      - name: workspace-storage
+        persistentVolumeClaim:
+          claimName: security-scan-workspace
+---
+# Worker for BlackDuck scans
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: security-scan-worker-blackduck
+  namespace: security-scan
+  labels:
+    app: security-scan-worker
+    scan-type: blackduck
+spec:
+  replicas: 2  # Fewer workers for BlackDuck (typically longer scans)
+  selector:
+    matchLabels:
+      app: security-scan-worker
+      scan-type: blackduck
+  template:
+    metadata:
+      labels:
+        app: security-scan-worker
+        scan-type: blackduck
+    spec:
+      containers:
+      - name: worker
+        image: security-scan-worker:latest  # Replace with your image
+        imagePullPolicy: Always
+        env:
+        - name: TEMPORAL_ADDRESS
+          value: "temporal-service.security-scan.svc.cluster.local:7233"
+        - name: WORKSPACE_BASE_DIR
+          value: "/workspace/security-scans"
+        # SCAN_TYPE: Dedicates this worker to BlackDuck scans
+        # This worker will poll SECURITY_SCAN_TASK_QUEUE_BLACKDUCK
+        - name: SCAN_TYPE
+          value: "BLACKDUCK_DETECT"
+        resources:
+          requests:
+            cpu: "1000m"
+            memory: "2Gi"
+          limits:
+            cpu: "2000m"
+            memory: "4Gi"
+        volumeMounts:
+        - name: workspace-storage
+          mountPath: /workspace
+        livenessProbe:
+          exec:
+            command:
+            - pgrep
+            - -f
+            - security-scan.jar
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        readinessProbe:
+          exec:
+            command:
+            - pgrep
+            - -f
+            - security-scan.jar
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      volumes:
+      - name: workspace-storage
+        persistentVolumeClaim:
+          claimName: security-scan-workspace
         resources:
           requests:
             cpu: "1000m"

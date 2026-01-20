@@ -2,7 +2,7 @@
 
 ## Overview
 
-The security scanning application automatically routes scans to appropriate task queues based on scan characteristics. This prevents long-running scans from blocking normal scans and allows priority scans to be processed faster.
+The security scanning application automatically routes scans to appropriate task queues based on scan type (tool type). Each scan type has its own dedicated queue, ensuring proper isolation and independent scaling.
 
 ## How It Works
 
@@ -11,91 +11,113 @@ The security scanning application automatically routes scans to appropriate task
 When a scan is initiated, the system determines the task queue using this priority order:
 
 1. **Explicit Queue Setting**: If `config.setTaskQueue()` is explicitly called, that queue is used
-2. **Priority-Based**: If `config.setPriority(ScanPriority.HIGH)` is set, uses priority queue
-3. **Timeout-Based**: If scan timeout > 30 minutes OR workflow timeout > 1 hour, uses long-running queue
-4. **Default**: Uses the default queue
+2. **Scan Type-Based**: Automatically routes to the queue for the scan type (tool type)
+3. **Default**: Uses the default queue (fallback only)
 
 ### Available Queues
 
-- **`SECURITY_SCAN_TASK_QUEUE_DEFAULT`**: Normal scans (default)
-- **`SECURITY_SCAN_TASK_QUEUE_LONG_RUNNING`**: Scans expected to take > 30 minutes
-- **`SECURITY_SCAN_TASK_QUEUE_PRIORITY`**: High-priority scans
+- **`SECURITY_SCAN_TASK_QUEUE_GITLEAKS`**: Gitleaks scans (GITLEAKS_SECRETS, GITLEAKS_FILE_HASH)
+- **`SECURITY_SCAN_TASK_QUEUE_BLACKDUCK`**: BlackDuck Detect scans
+- **`SECURITY_SCAN_TASK_QUEUE_DEFAULT`**: Default fallback queue (used if scan type is not recognized)
 
 ## Usage Examples
 
-### Example 1: High-Priority Scan
+### Example 1: Gitleaks Scan (Automatic Routing)
 
 ```java
-ScanConfig config = new ScanConfig();
-config.setPriority(ScanPriority.HIGH);  // Automatically routes to priority queue
+GitleaksScanClient client = new GitleaksScanClient();
+ScanRequest request = client.createScanRequest(
+    "app-123",
+    "api-component",
+    "build-456",
+    "https://github.com/example/repo.git",
+    "main",
+    "abc123def456"
+);
 
-ScanRequest request = new ScanRequest(...);
-request.setScanConfig(config);
-
-// Scan will be routed to SECURITY_SCAN_TASK_QUEUE_PRIORITY
-SecurityScanWorkflow workflow = client.newWorkflowStub(...);
-workflow.executeScans(request);
+// Automatically routes to SECURITY_SCAN_TASK_QUEUE_GITLEAKS
+String workflowId = client.submitScan(request);
 ```
 
-### Example 2: Long-Running Scan (Automatic Detection)
+### Example 2: BlackDuck Scan (Automatic Routing)
 
 ```java
-ScanConfig config = new ScanConfig();
-config.setScanTimeoutSeconds(3600);  // 1 hour timeout (> 30 min)
-// Automatically routes to long-running queue
+BlackDuckScanClient client = new BlackDuckScanClient();
+ScanRequest request = client.createScanRequest(
+    "app-123",
+    "api-component",
+    "build-456",
+    "https://github.com/example/repo.git",
+    "main",
+    "abc123def456"
+);
 
-ScanRequest request = new ScanRequest(...);
-request.setScanConfig(config);
-
-// Scan will be routed to SECURITY_SCAN_TASK_QUEUE_LONG_RUNNING
+// Automatically routes to SECURITY_SCAN_TASK_QUEUE_BLACKDUCK
+String workflowId = client.submitScan(request);
 ```
 
 ### Example 3: Explicit Queue Selection
 
 ```java
 ScanConfig config = new ScanConfig();
-config.setTaskQueue(Shared.SECURITY_SCAN_TASK_QUEUE_LONG_RUNNING);
-// Explicitly set queue (overrides automatic routing)
+config.setTaskQueue("CUSTOM_QUEUE_NAME");  // Override automatic routing
 
 ScanRequest request = new ScanRequest(...);
 request.setScanConfig(config);
 
-// Scan will use the explicitly set queue
-```
-
-### Example 4: Normal Scan (Default)
-
-```java
-ScanConfig config = new ScanConfig();
-// No priority, no long timeout -> uses default queue
-
-ScanRequest request = new ScanRequest(...);
-request.setScanConfig(config);
-
-// Scan will be routed to SECURITY_SCAN_TASK_QUEUE_DEFAULT
+// Uses explicitly set queue
 ```
 
 ## Worker Configuration
 
-### Option 1: Single Worker Polling All Queues (Default)
+### Option 1: Scan-Type Specific Workers (Recommended)
 
-By default, workers poll all queues. This is the simplest setup:
+Each scan type has dedicated workers:
 
 ```yaml
+# Worker for Gitleaks
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: security-scan-worker
+  name: security-scan-worker-gitleaks
 spec:
-  replicas: 5
   template:
     spec:
       containers:
       - name: worker
         env:
-        # If TASK_QUEUES is not set, worker polls all queues by default
-        - name: TEMPORAL_ADDRESS
-          value: "temporal-service:7233"
+        - name: SCAN_TYPE
+          value: "GITLEAKS_SECRETS"
+        # Polls SECURITY_SCAN_TASK_QUEUE_GITLEAKS
+---
+# Worker for BlackDuck
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: security-scan-worker-blackduck
+spec:
+  template:
+    spec:
+      containers:
+      - name: worker
+        env:
+        - name: SCAN_TYPE
+          value: "BLACKDUCK_DETECT"
+        # Polls SECURITY_SCAN_TASK_QUEUE_BLACKDUCK
+```
+
+**Benefits**:
+- Clear isolation between scan types
+- Independent scaling per scan type
+- Different resource allocations per scan type
+
+### Option 2: Multi-Queue Worker (Fallback)
+
+A single worker can poll multiple queues:
+
+```yaml
+env:
+# If SCAN_TYPE is not set, worker polls all scan-type queues
 ```
 
 **Benefits**:
@@ -107,160 +129,78 @@ spec:
 - Cannot scale queues independently
 - All workers share resources
 
-### Option 2: Separate Workers for Each Queue
-
-Deploy dedicated workers for specific queues:
-
-```yaml
-# Worker for default queue
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: security-scan-worker
-spec:
-  replicas: 5
-  template:
-    spec:
-      containers:
-      - name: worker
-        env:
-        - name: TASK_QUEUES
-          value: "SECURITY_SCAN_TASK_QUEUE"
----
-# Worker for long-running queue
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: security-scan-worker-long-running
-spec:
-  replicas: 2
-  template:
-    spec:
-      containers:
-      - name: worker
-        env:
-        - name: TASK_QUEUES
-          value: "SECURITY_SCAN_TASK_QUEUE_LONG_RUNNING"
----
-# Worker for priority queue
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: security-scan-worker-priority
-spec:
-  replicas: 3
-  template:
-    spec:
-      containers:
-      - name: worker
-        env:
-        - name: TASK_QUEUES
-          value: "SECURITY_SCAN_TASK_QUEUE_PRIORITY"
-```
-
-**Benefits**:
-- Independent scaling per queue type
-- Different resource allocations per queue
-- Better isolation
-
-**Drawbacks**:
-- More complex deployment
-- More pods to manage
-
-### Option 3: Custom Queue Selection
-
-Poll specific queues:
-
-```yaml
-env:
-- name: TASK_QUEUES
-  value: "SECURITY_SCAN_TASK_QUEUE,SECURITY_SCAN_TASK_QUEUE_PRIORITY"
-```
-
-This worker will only poll the default and priority queues.
-
 ## Queue Selection Rules
 
-### Long-Running Queue
+### Gitleaks Queue
 
-A scan is routed to the long-running queue if:
-- `scanTimeoutSeconds > 1800` (30 minutes), OR
-- `workflowTimeoutSeconds > 3600` (1 hour), OR
-- Multiple scan types (≥3) with parallel execution enabled
+A scan is routed to the Gitleaks queue if:
+- Tool type is `GITLEAKS_SECRETS` OR
+- Tool type is `GITLEAKS_FILE_HASH`
 
-### Priority Queue
+### BlackDuck Queue
 
-A scan is routed to the priority queue if:
-- `priority == ScanPriority.HIGH`
+A scan is routed to the BlackDuck queue if:
+- Tool type is `BLACKDUCK_DETECT`
 
 ### Default Queue
 
 A scan uses the default queue if:
-- No explicit queue is set, AND
-- Priority is not HIGH, AND
-- Timeouts don't indicate long-running scan
+- Scan type is not recognized (fallback only)
 
 ## Implementation Details
 
 ### Queue Determination
 
-The queue is determined in `SecurityScanClient.determineTaskQueue()`:
+The queue is determined in `BaseScanClient` and `Shared.getTaskQueueForScanType()`:
 
 ```java
-private static String determineTaskQueue(ScanRequest request) {
-    ScanConfig config = request.getScanConfig();
-    
-    // 1. Explicit queue setting
-    if (config != null && config.getTaskQueue() != null) {
-        return config.getTaskQueue();
+// In BaseScanClient
+String taskQueue = Shared.getTaskQueueForScanType(supportedScanType);
+
+// In Shared.java
+static String getTaskQueueForScanType(ScanType scanType) {
+    switch (scanType) {
+        case GITLEAKS_SECRETS:
+        case GITLEAKS_FILE_HASH:
+            return TASK_QUEUE_GITLEAKS;
+        case BLACKDUCK_DETECT:
+            return TASK_QUEUE_BLACKDUCK;
+        default:
+            return SECURITY_SCAN_TASK_QUEUE_DEFAULT;
     }
-    
-    // 2. Priority-based
-    if (config != null && config.getPriority() == ScanPriority.HIGH) {
-        return Shared.SECURITY_SCAN_TASK_QUEUE_PRIORITY;
-    }
-    
-    // 3. Timeout-based
-    if (isLongRunning(config)) {
-        return Shared.SECURITY_SCAN_TASK_QUEUE_LONG_RUNNING;
-    }
-    
-    // 4. Default
-    return Shared.SECURITY_SCAN_TASK_QUEUE_DEFAULT;
 }
 ```
 
 ### Worker Polling
 
-Workers poll queues based on the `TASK_QUEUES` environment variable:
+Workers poll queues based on the `SCAN_TYPE` environment variable:
 
-- **Not set**: Polls all queues (default, long-running, priority)
-- **Set**: Polls only the specified queues (comma-separated)
+- **Set to specific scan type**: Polls only that scan type's queue
+- **Not set**: Polls all scan-type queues (Gitleaks, BlackDuck, Default)
 
 ## Best Practices
 
-1. **Use Priority for Important Scans**: Set `priority = HIGH` for time-sensitive scans
-2. **Set Appropriate Timeouts**: Long timeouts automatically route to long-running queue
-3. **Deploy Separate Workers**: For production, deploy separate workers for better isolation
-4. **Monitor Queue Depths**: Track queue depths to identify bottlenecks
-5. **Scale Workers Appropriately**: Scale priority queue workers more aggressively
+1. **Use Scan-Type Specific Clients**: Use `GitleaksScanClient` and `BlackDuckScanClient` for automatic routing
+2. **Deploy Separate Workers**: For production, deploy separate workers for each scan type
+3. **Monitor Queue Depths**: Track queue depths to identify bottlenecks
+4. **Scale Workers Appropriately**: Scale workers based on scan type workload
 
 ## Troubleshooting
 
 ### Scan Not Using Expected Queue
 
 - Check if `taskQueue` is explicitly set (overrides automatic routing)
-- Verify timeout values (must be > 30 min for long-running)
-- Check priority setting (must be HIGH for priority queue)
+- Verify tool type is correctly set in `ScanRequest`
+- Check client type matches scan type
 
 ### Workers Not Picking Up Scans
 
-- Verify `TASK_QUEUES` environment variable includes the queue
+- Verify `SCAN_TYPE` environment variable matches the queue
 - Check worker logs for queue registration
 - Ensure workers are running and connected to Temporal
 
 ### Queue Not Polled
 
-- Default: Workers poll all queues if `TASK_QUEUES` is not set
-- Custom: Set `TASK_QUEUES` to include the desired queues
-- Separate: Deploy dedicated workers for each queue
+- Default: Workers poll all queues if `SCAN_TYPE` is not set
+- Specific: Set `SCAN_TYPE` to poll only that scan type's queue
+- Separate: Deploy dedicated workers for each scan type

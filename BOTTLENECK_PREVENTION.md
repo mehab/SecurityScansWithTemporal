@@ -61,74 +61,75 @@ WorkflowOptions options = WorkflowOptions.newBuilder()
     .build();
 ```
 
-### 3. Separate Task Queues (Automatic Routing)
+### 3. Scan-Type Based Queue Separation
 
-The system automatically routes scans to appropriate task queues based on:
-- **Priority**: HIGH priority scans → priority queue
-- **Timeout**: Long timeouts (>30 min scan or >1 hour workflow) → long-running queue
+The system automatically routes scans to appropriate task queues based on scan type (tool type):
+- **Gitleaks scans** → `SECURITY_SCAN_TASK_QUEUE_GITLEAKS`
+- **BlackDuck scans** → `SECURITY_SCAN_TASK_QUEUE_BLACKDUCK`
 - **Explicit setting**: Manually set queue in config
 
 **Automatic Queue Selection**:
 
 ```java
+// Gitleaks scans automatically route to GITLEAKS queue
+GitleaksScanClient gitleaksClient = new GitleaksScanClient();
+ScanRequest gitleaksRequest = gitleaksClient.createScanRequest(...);
+gitleaksClient.submitScan(gitleaksRequest);  // Routes to SECURITY_SCAN_TASK_QUEUE_GITLEAKS
+
+// BlackDuck scans automatically route to BLACKDUCK queue
+BlackDuckScanClient bdClient = new BlackDuckScanClient();
+ScanRequest bdRequest = bdClient.createScanRequest(...);
+bdClient.submitScan(bdRequest);  // Routes to SECURITY_SCAN_TASK_QUEUE_BLACKDUCK
+
+// Option: Explicitly set queue (overrides automatic routing)
 ScanConfig config = new ScanConfig();
-
-// Option 1: Set priority (HIGH -> priority queue)
-config.setPriority(ScanPriority.HIGH);  // Automatically uses priority queue
-
-// Option 2: Set long timeout (automatically uses long-running queue)
-config.setScanTimeoutSeconds(3600);  // > 30 min -> long-running queue
-config.setWorkflowTimeoutSeconds(7200);  // > 1 hour -> long-running queue
-
-// Option 3: Explicitly set queue
-config.setTaskQueue(Shared.SECURITY_SCAN_TASK_QUEUE_LONG_RUNNING);
+config.setTaskQueue("CUSTOM_QUEUE_NAME");
 ```
 
 **Queue Selection Priority**:
 1. Explicitly set task queue (if `config.setTaskQueue()` is called)
-2. Priority-based: HIGH priority → priority queue
-3. Timeout-based: Long timeouts → long-running queue
-4. Default: Normal queue
+2. Scan type-based: Automatically routes to scan type's queue
+3. Default: Fallback queue (only if scan type is not recognized)
 
 **Task Queue Options** (defined in `Shared.java`):
-- `SECURITY_SCAN_TASK_QUEUE_DEFAULT`: Default queue for normal scans
-- `SECURITY_SCAN_TASK_QUEUE_LONG_RUNNING`: For scans expected to take > 30 minutes
-- `SECURITY_SCAN_TASK_QUEUE_PRIORITY`: For high-priority scans
+- `SECURITY_SCAN_TASK_QUEUE_GITLEAKS`: For Gitleaks scans
+- `SECURITY_SCAN_TASK_QUEUE_BLACKDUCK`: For BlackDuck scans
+- `SECURITY_SCAN_TASK_QUEUE_DEFAULT`: Default fallback queue
 
 **Worker Configuration**:
 
-Workers can poll multiple queues or you can deploy separate workers:
+Deploy separate workers for each scan type:
 
 ```yaml
-# Worker for normal scans
+# Worker for Gitleaks scans
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: security-scan-worker
+  name: security-scan-worker-gitleaks
 spec:
-  replicas: 5  # More workers for normal scans
+  replicas: 5
   template:
     spec:
       containers:
       - name: worker
         env:
-        - name: TASK_QUEUE
-          value: "SECURITY_SCAN_TASK_QUEUE"  # Default queue
+        - name: SCAN_TYPE
+          value: "GITLEAKS_SECRETS"  # Polls SECURITY_SCAN_TASK_QUEUE_GITLEAKS
 ---
-# Worker for long-running scans
+# Worker for BlackDuck scans
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: security-scan-worker-long-running
+  name: security-scan-worker-blackduck
 spec:
-  replicas: 2  # Fewer workers for long-running scans
+  replicas: 2
   template:
     spec:
       containers:
       - name: worker
         env:
-        - name: TASK_QUEUE
-          value: "SECURITY_SCAN_TASK_QUEUE_LONG_RUNNING"  # Long-running queue
+        - name: SCAN_TYPE
+          value: "BLACKDUCK_DETECT"  # Polls SECURITY_SCAN_TASK_QUEUE_BLACKDUCK
 ```
 
 ### 4. Activity Heartbeats
@@ -251,22 +252,18 @@ ScanConfig config = new ScanConfig();
 config.setScanTimeoutSeconds(900); // 15 minutes
 config.setWorkflowTimeoutSeconds(3600); // 1 hour
 
-// Use appropriate queue based on expected duration
-if (expectedDuration > 30 * 60) { // > 30 minutes
-    config.setScanTimeoutSeconds((int)expectedDuration);  // Automatically routes to long-running queue
-} else {
-    // Uses default queue automatically
-}
+// Use scan-type specific clients for automatic queue routing
+GitleaksScanClient gitleaksClient = new GitleaksScanClient();
+BlackDuckScanClient bdClient = new BlackDuckScanClient();
 
-// OR set priority for high-priority scans
-if (isHighPriority) {
-    config.setPriority(ScanPriority.HIGH);  // Automatically routes to priority queue
-}
+// Each client automatically routes to its dedicated queue
+// Gitleaks → SECURITY_SCAN_TASK_QUEUE_GITLEAKS
+// BlackDuck → SECURITY_SCAN_TASK_QUEUE_BLACKDUCK
 ```
 
 **Best For**:
 - Production environments
-- When you need both isolation and timeouts
+- When you need isolation between scan types
 - When you have diverse scan requirements
 
 ## Monitoring
@@ -296,28 +293,29 @@ Set up alerts for:
 **Solution**:
 
 ```java
+// Use scan-type specific client for automatic queue routing
+GitleaksScanClient client = new GitleaksScanClient();
+
 ScanConfig config = new ScanConfig();
 
 // 1. Set shorter timeout for this scan
 config.setScanTimeoutSeconds(1800); // 30 minutes (default)
 
-// 2. Use long-running queue to isolate
-config.setTaskQueue(Shared.SECURITY_SCAN_TASK_QUEUE_LONG_RUNNING);
-
-// 3. Set workflow timeout as safety net
+// 2. Set workflow timeout as safety net
 config.setWorkflowTimeoutSeconds(5400); // 90 minutes total
 
-// 4. Use space-efficient strategies to speed up scan
+// 3. Use space-efficient strategies to speed up scan
 config.setCloneStrategy(CloneStrategy.SHALLOW_SINGLE_BRANCH);
 config.setUseSparseCheckout(true);
 config.addSparseCheckoutPath("src/");
 
-// 5. Use separate queue to isolate long-running scan
-config.setTaskQueue(Shared.SECURITY_SCAN_TASK_QUEUE_LONG_RUNNING);
+ScanRequest request = client.createScanRequest(...);
+request.setScanConfig(config);
+client.submitScan(request);
 ```
 
 **Result**:
-- Scan runs in isolated queue (doesn't block normal scans)
+- Scan runs in scan-type specific queue (GITLEAKS queue, isolated from BlackDuck scans)
 - Fails after 30 minutes if scan tool is stuck
 - Workflow fails after 90 minutes if workflow is stuck
 - Faster scan due to space-efficient cloning
@@ -339,11 +337,11 @@ config.setTaskQueue(Shared.SECURITY_SCAN_TASK_QUEUE_LONG_RUNNING);
 
 1. ✅ **Set Activity Timeouts**: Fail activities that take too long
 2. ✅ **Set Workflow Timeouts**: Fail workflows that exceed expected time
-3. ✅ **Use Separate Task Queues**: Isolate long-running scans
+3. ✅ **Use Scan-Type Based Queues**: Isolate different scan types
 4. ✅ **Scale Workers**: Add more workers to handle load
 5. ✅ **Monitor Metrics**: Track queue depth and activity duration
 6. ✅ **Implement Heartbeats**: Detect stuck activities faster
 7. ✅ **Support Cancellation**: Allow manual cancellation of stuck scans
 
-The system now supports all these strategies through configurable timeouts and task queues.
+The system now supports all these strategies through configurable timeouts and scan-type based queue routing.
 

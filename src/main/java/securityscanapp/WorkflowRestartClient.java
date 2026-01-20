@@ -223,15 +223,26 @@ public class WorkflowRestartClient {
      * @return New workflow execution ID
      */
     public String restartWorkflow(ScanRequest originalRequest, boolean useNewWorkflowId) {
-        // Determine task queue from config or use default
-        String taskQueue = Shared.SECURITY_SCAN_TASK_QUEUE_DEFAULT;
-        if (originalRequest.getScanConfig() != null && originalRequest.getScanConfig().getTaskQueue() != null) {
+        // Determine task queue based on scan type (tool type) or config
+        String taskQueue;
+        if (originalRequest.getToolType() != null) {
+            // Route based on tool type
+            taskQueue = Shared.getTaskQueueForScanType(originalRequest.getToolType());
+        } else if (originalRequest.getScanConfig() != null && originalRequest.getScanConfig().getTaskQueue() != null) {
             taskQueue = originalRequest.getScanConfig().getTaskQueue();
+        } else {
+            taskQueue = Shared.SECURITY_SCAN_TASK_QUEUE_DEFAULT;
         }
         
-        String workflowId = useNewWorkflowId 
-            ? "security-scan-" + originalRequest.getScanId() + "-restart-" + System.currentTimeMillis()
-            : "security-scan-" + originalRequest.getScanId();
+        // Generate workflow ID: appId-component-buildId-toolType
+        String workflowId;
+        if (useNewWorkflowId) {
+            // Add restart suffix to workflow ID
+            workflowId = originalRequest.generateWorkflowId() + "-restart-" + System.currentTimeMillis();
+        } else {
+            // Reuse original workflow ID
+            workflowId = originalRequest.generateWorkflowId();
+        }
         
         WorkflowOptions.Builder optionsBuilder = WorkflowOptions.newBuilder()
             .setTaskQueue(taskQueue)

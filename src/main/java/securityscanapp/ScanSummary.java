@@ -10,6 +10,10 @@ import java.util.HashMap;
  */
 public class ScanSummary {
     private String scanId;
+    private String appId; // Application ID
+    private String component; // Component name
+    private String buildId; // Build ID
+    private ScanType toolType; // Tool type (scan type)
     private String repositoryUrl;
     private String commitSha;
     private boolean allScansSuccessful;
@@ -101,6 +105,39 @@ public class ScanSummary {
      */
     public Object getMetadata(String key) {
         return this.summary.get(key);
+    }
+    
+    // Getters and Setters for new structure
+    public String getAppId() {
+        return appId;
+    }
+    
+    public void setAppId(String appId) {
+        this.appId = appId;
+    }
+    
+    public String getComponent() {
+        return component;
+    }
+    
+    public void setComponent(String component) {
+        this.component = component;
+    }
+    
+    public String getBuildId() {
+        return buildId;
+    }
+    
+    public void setBuildId(String buildId) {
+        this.buildId = buildId;
+    }
+    
+    public ScanType getToolType() {
+        return toolType;
+    }
+    
+    public void setToolType(ScanType toolType) {
+        this.toolType = toolType;
     }
 }
 

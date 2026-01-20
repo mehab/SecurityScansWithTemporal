@@ -24,8 +24,7 @@ public class ScanConfig {
     private StorageConfig storageConfig; // Configuration for storing results to external storage
     private Integer scanTimeoutSeconds; // Per-scan timeout in seconds (null = use default)
     private Integer workflowTimeoutSeconds; // Workflow execution timeout in seconds (null = no timeout)
-    private String taskQueue; // Task queue name (null = auto-determined based on priority/timeout)
-    private ScanPriority priority; // Scan priority (null = NORMAL)
+    private String taskQueue; // Task queue name (null = auto-determined based on scan type)
     
     public ScanConfig() {
         this.cleanupAfterEachScan = true; // Default to cleanup for space efficiency
@@ -186,12 +185,5 @@ public class ScanConfig {
         this.taskQueue = taskQueue;
     }
     
-    public ScanPriority getPriority() {
-        return priority;
-    }
-    
-    public void setPriority(ScanPriority priority) {
-        this.priority = priority;
-    }
 }
 

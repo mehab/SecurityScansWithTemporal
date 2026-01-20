@@ -32,13 +32,17 @@ public class SecurityScanClient {
         // Example: Create a scan request
         ScanRequest request = createExampleScanRequest();
         
-        // Determine task queue from config, priority, or auto-detect based on timeout
+        // Determine task queue based on scan type (tool type)
+        // Each scan type has its own dedicated queue for dedicated workers
         String taskQueue = determineTaskQueue(request);
+        
+        // Generate workflow ID: appId-component-buildId-toolType
+        String workflowId = request.generateWorkflowId();
         
         // Configure workflow options with timeout if specified
         WorkflowOptions.Builder optionsBuilder = WorkflowOptions.newBuilder()
             .setTaskQueue(taskQueue)
-            .setWorkflowId("security-scan-" + request.getScanId());
+            .setWorkflowId(workflowId);
         
         // Set workflow execution timeout if configured
         if (request.getScanConfig() != null && request.getScanConfig().getWorkflowTimeoutSeconds() != null) {
@@ -53,9 +57,14 @@ public class SecurityScanClient {
         SecurityScanWorkflow workflow = client.newWorkflowStub(SecurityScanWorkflow.class, options);
         
         System.out.println("Initiating security scan workflow...");
+        System.out.println("Application ID: " + request.getAppId());
+        System.out.println("Component: " + request.getComponent());
+        System.out.println("Build ID: " + request.getBuildId());
+        System.out.println("Tool Type: " + request.getToolType());
         System.out.println("Scan ID: " + request.getScanId());
+        System.out.println("Workflow ID: " + workflowId);
+        System.out.println("Task Queue: " + taskQueue);
         System.out.println("Repository: " + request.getRepositoryUrl());
-        System.out.println("Scan Types: " + request.getScanTypes());
         
         // Execute workflow
         try {
@@ -86,17 +95,16 @@ public class SecurityScanClient {
     }
     
     private static ScanRequest createExampleScanRequest() {
+        // Example using structure: appId, component, buildId, toolType
         ScanRequest request = new ScanRequest(
-            "scan-" + System.currentTimeMillis(),
+            "app-123",                    // Application ID
+            "component-api",              // Component name
+            "build-456",                  // Build ID
+            ScanType.GITLEAKS_SECRETS,    // Tool type (single scan type per request)
             "https://github.com/example/repo.git",
             "main",
-            null
+            "abc123def456"                // Commit SHA
         );
-        
-        // Add scan types
-        request.addScanType(ScanType.GITLEAKS_SECRETS);
-        request.addScanType(ScanType.GITLEAKS_FILE_HASH);
-        request.addScanType(ScanType.BLACKDUCK_DETECT);
         
         // Configure scan settings
         ScanConfig config = new ScanConfig();
@@ -117,15 +125,12 @@ public class SecurityScanClient {
         // Set to false for sequential execution (space-efficient, default)
         config.setExecuteScansInParallel(false); // Change to true for parallel execution
         
-        // Configure timeouts to prevent long-running scans from blocking the queue
+        // Configure timeouts
         // Option 1: Set per-scan timeout (default is 30 minutes)
         // config.setScanTimeoutSeconds(900); // 15 minutes for faster scans
         
         // Option 2: Set workflow execution timeout (fails entire workflow if exceeded)
         // config.setWorkflowTimeoutSeconds(3600); // 1 hour total
-        
-        // Option 3: Use separate task queue for long-running scans
-        // config.setTaskQueue(Shared.SECURITY_SCAN_TASK_QUEUE_LONG_RUNNING);
         
         // In production, load credentials from secure storage (Kubernetes Secrets, etc.)
         // config.setGitUsername("user");
@@ -145,9 +150,8 @@ public class SecurityScanClient {
      * 
      * Priority order:
      * 1. Explicitly set task queue in config
-     * 2. Priority-based queue (HIGH -> priority queue)
-     * 3. Timeout-based queue (long timeout -> long-running queue)
-     * 4. Default queue
+     * 2. Scan type-based queue (each tool type has its own queue)
+     * 3. Default queue (fallback)
      * 
      * @param request Scan request
      * @return Task queue name
@@ -160,36 +164,14 @@ public class SecurityScanClient {
             return config.getTaskQueue();
         }
         
-        // 2. If priority is HIGH, use priority queue
-        if (config != null && config.getPriority() == ScanPriority.HIGH) {
-            return Shared.SECURITY_SCAN_TASK_QUEUE_PRIORITY;
+        // 2. Route based on scan type (tool type) - each tool type has its own queue
+        // This ensures one worker per scan type
+        ScanType toolType = request.getToolType();
+        if (toolType != null) {
+            return Shared.getTaskQueueForScanType(toolType);
         }
         
-        // 3. If scan timeout or workflow timeout indicates long-running scan, use long-running queue
-        // Consider it long-running if:
-        // - Scan timeout > 30 minutes (1800 seconds)
-        // - Workflow timeout > 1 hour (3600 seconds)
-        // - Multiple scan types with parallel execution (likely longer)
-        boolean isLongRunning = false;
-        
-        if (config != null) {
-            if (config.getScanTimeoutSeconds() != null && config.getScanTimeoutSeconds() > 1800) {
-                isLongRunning = true;
-            } else if (config.getWorkflowTimeoutSeconds() != null && config.getWorkflowTimeoutSeconds() > 3600) {
-                isLongRunning = true;
-            } else if (request.getScanTypes() != null && 
-                      request.getScanTypes().size() >= 3 && 
-                      config.isExecuteScansInParallel()) {
-                // Multiple scans in parallel might take longer
-                isLongRunning = true;
-            }
-        }
-        
-        if (isLongRunning) {
-            return Shared.SECURITY_SCAN_TASK_QUEUE_LONG_RUNNING;
-        }
-        
-        // 4. Default queue
+        // 3. Default queue (fallback)
         return Shared.SECURITY_SCAN_TASK_QUEUE_DEFAULT;
     }
 }

@@ -52,53 +52,86 @@ public class SecurityScanWorker {
         // Create Worker factory
         WorkerFactory factory = WorkerFactory.newInstance(client);
         
-        // Get task queues to poll from environment variable (comma-separated)
-        // Default: poll all queues
-        String taskQueuesEnv = System.getenv("TASK_QUEUES");
-        String[] taskQueues;
-        if (taskQueuesEnv != null && !taskQueuesEnv.isEmpty()) {
-            taskQueues = taskQueuesEnv.split(",");
-            for (int i = 0; i < taskQueues.length; i++) {
-                taskQueues[i] = taskQueues[i].trim();
+        // Get scan type (tool type) for this worker from environment variable
+        // Each worker is dedicated to a specific scan type
+        String scanTypeEnv = System.getenv("SCAN_TYPE");
+        String taskQueue;
+        
+        if (scanTypeEnv != null && !scanTypeEnv.isEmpty()) {
+            // Worker is configured for a specific scan type
+            try {
+                ScanType scanType = ScanType.valueOf(scanTypeEnv.toUpperCase());
+                taskQueue = Shared.getTaskQueueForScanType(scanType);
+                System.out.println("Worker configured for scan type: " + scanType);
+            } catch (IllegalArgumentException e) {
+                System.err.println("Invalid SCAN_TYPE: " + scanTypeEnv);
+                System.err.println("Valid values: GITLEAKS_SECRETS, GITLEAKS_FILE_HASH, BLACKDUCK_DETECT");
+                System.err.println("Falling back to default queue");
+                taskQueue = Shared.SECURITY_SCAN_TASK_QUEUE_DEFAULT;
             }
         } else {
-            // Default: poll all queues
-            taskQueues = new String[]{
-                Shared.SECURITY_SCAN_TASK_QUEUE_DEFAULT,
-                Shared.SECURITY_SCAN_TASK_QUEUE_LONG_RUNNING,
-                Shared.SECURITY_SCAN_TASK_QUEUE_PRIORITY
-            };
+            // Fallback: Use TASK_QUEUE environment variable or default
+            String taskQueueEnv = System.getenv("TASK_QUEUE");
+            if (taskQueueEnv != null && !taskQueueEnv.isEmpty()) {
+                taskQueue = taskQueueEnv;
+            } else {
+                // Default: poll all scan-type queues
+                taskQueue = null; // Will create workers for all scan types
+            }
         }
         
-        // Create workers for each task queue
-        for (String taskQueue : taskQueues) {
+        if (taskQueue != null) {
+            // Single queue worker
             Worker worker = factory.newWorker(taskQueue);
+            registerWorkerComponents(worker);
+            System.out.println("Security Scan Worker started");
+            System.out.println("Task Queue: " + taskQueue);
+        } else {
+            // Poll all scan-type queues (for backward compatibility or multi-type worker)
+            String[] taskQueues = new String[]{
+                Shared.TASK_QUEUE_GITLEAKS,
+                Shared.TASK_QUEUE_BLACKDUCK,
+                Shared.SECURITY_SCAN_TASK_QUEUE_DEFAULT  // Fallback
+            };
             
-            // Register workflow implementation
-            worker.registerWorkflowImplementationTypes(SecurityScanWorkflowImpl.class);
+            for (String queue : taskQueues) {
+                Worker worker = factory.newWorker(queue);
+                registerWorkerComponents(worker);
+                System.out.println("Registered worker for task queue: " + queue);
+            }
             
-            // Register activity implementations
-            worker.registerActivitiesImplementations(
-                new RepositoryActivityImpl(),
-                new GitleaksScanActivityImpl(),
-                new BlackDuckScanActivityImpl(),
-                new StorageActivityImpl()
-            );
-            
-            System.out.println("Registered worker for task queue: " + taskQueue);
+            System.out.println("Security Scan Worker started");
+            System.out.println("Polling task queues: " + String.join(", ", taskQueues));
         }
         
-        System.out.println("Security Scan Worker started");
-        System.out.println("Polling task queues: " + String.join(", ", taskQueues));
         System.out.println("Workspace Base Directory: " + Shared.WORKSPACE_BASE_DIR);
-        System.out.println("Worker is running and actively polling the Task Queues.");
+        System.out.println("Worker is running and actively polling the Task Queue(s).");
         System.out.println("To quit, use ^C to interrupt.");
         System.out.println();
-        System.out.println("Note: Set TASK_QUEUES environment variable to poll specific queues");
-        System.out.println("      Example: TASK_QUEUES=SECURITY_SCAN_TASK_QUEUE,SECURITY_SCAN_TASK_QUEUE_PRIORITY");
+        System.out.println("Configuration:");
+        System.out.println("  - Set SCAN_TYPE environment variable to dedicate worker to a scan type");
+        System.out.println("    Example: SCAN_TYPE=GITLEAKS_SECRETS");
+        System.out.println("  - Or set TASK_QUEUE to specify a custom queue");
+        System.out.println("    Example: TASK_QUEUE=SECURITY_SCAN_TASK_QUEUE_GITLEAKS");
         
         // Start all registered workers
         factory.start();
+    }
+    
+    /**
+     * Register workflow and activity implementations with a worker
+     */
+    private static void registerWorkerComponents(Worker worker) {
+        // Register workflow implementation
+        worker.registerWorkflowImplementationTypes(SecurityScanWorkflowImpl.class);
+        
+        // Register activity implementations
+        worker.registerActivitiesImplementations(
+            new RepositoryActivityImpl(),
+            new GitleaksScanActivityImpl(),
+            new BlackDuckScanActivityImpl(),
+            new StorageActivityImpl()
+        );
     }
 }
 

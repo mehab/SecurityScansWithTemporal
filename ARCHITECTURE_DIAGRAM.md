@@ -1,5 +1,17 @@
 # Security Scan Application - Architecture Diagram
 
+## Application Structure
+
+Each scan request is structured as:
+- **Application ID (appId)**: Identifies the application
+- **Component**: Component within the application
+- **Build ID (buildId)**: Unique build identifier for the component
+- **Tool Type**: Single scan type (Gitleaks, BlackDuck, etc.)
+
+**Workflow ID Format**: `{appId}-{component}-{buildId}-{toolType}`
+
+Example: `app-123-api-component-build-456-gitleaks-secrets`
+
 ## High-Level Architecture Overview
 
 ```
@@ -18,9 +30,11 @@
 │  │                                      │                                         │  │
 │  │                           ┌──────────▼──────────┐                             │  │
 │  │                           │  ScanRequest        │                             │  │
+│  │                           │  + appId            │                             │  │
+│  │                           │  + component        │                             │  │
+│  │                           │  + buildId          │                             │  │
+│  │                           │  + toolType         │                             │  │
 │  │                           │  + ScanConfig       │                             │  │
-│  │                           │  + Priority         │                             │  │
-│  │                           │  + Timeouts         │                             │  │
 │  │                           └──────────┬──────────┘                             │  │
 │  └──────────────────────────────────────┼───────────────────────────────────────┘  │
 │                                          │                                          │
@@ -29,20 +43,21 @@
 │                          │  (determineTaskQueue())         │                        │
 │                          │                                 │                        │
 │                          │  1. Explicit queue? → Use it   │                        │
-│                          │  2. Priority=HIGH? → Priority  │                        │
-│                          │  3. Long timeout? → Long-run   │                        │
-│                          │  4. Default → Default queue    │                        │
+│                          │  2. Tool Type → Scan-type queue│                        │
+│                          │     • Gitleaks → GITLEAKS queue│                        │
+│                          │     • BlackDuck → BLACKDUCK   │                        │
+│                          │  3. Default → Default queue    │                        │
 │                          └───────────────┬────────────────┘                        │
 │                                          │                                          │
 │              ┌───────────────────────────┼───────────────────────────┐            │
 │              │                           │                           │            │
 │    ┌─────────▼─────────┐    ┌───────────▼──────────┐    ┌───────────▼──────────┐ │
-│    │ DEFAULT QUEUE      │    │ LONG-RUNNING QUEUE   │    │ PRIORITY QUEUE       │ │
-│    │ (Normal scans)     │    │ (>30 min scans)      │    │ (HIGH priority)      │ │
+│    │ GITLEAKS QUEUE     │    │ BLACKDUCK QUEUE       │    │ DEFAULT QUEUE         │ │
+│    │ (Gitleaks scans)   │    │ (BlackDuck scans)     │    │ (Fallback)            │ │
 │    │                    │    │                      │    │                      │ │
 │    │ SECURITY_SCAN_     │    │ SECURITY_SCAN_       │    │ SECURITY_SCAN_       │ │
-│    │ TASK_QUEUE         │    │ TASK_QUEUE_          │    │ TASK_QUEUE_          │ │
-│    │                    │    │ LONG_RUNNING         │    │ PRIORITY             │ │
+│    │ TASK_QUEUE_        │    │ TASK_QUEUE_           │    │ TASK_QUEUE           │ │
+│    │ GITLEAKS           │    │ BLACKDUCK             │    │                      │ │
 │    └─────────┬─────────┘    └───────────┬──────────┘    └───────────┬──────────┘ │
 │              │                           │                           │            │
 │              └───────────────────────────┼───────────────────────────┘            │
@@ -58,25 +73,27 @@
 │  │  ┌─────────────────────────────────────────────────────────────────────────┐  │  │
 │  │  │                    WORKER POLLING CONFIGURATION                          │  │  │
 │  │  │                                                                           │  │  │
-│  │  │  Option 1: Single Worker (Default)                                       │  │  │
+│  │  │  Option 1: Scan-Type Specific Workers (Recommended)                     │  │  │
 │  │  │  ┌─────────────────────────────────────────────────────────────────────┐ │  │  │
-│  │  │  │ SecurityScanWorker                                                  │ │  │  │
-│  │  │  │ TASK_QUEUES: (not set)                                              │ │  │  │
-│  │  │  │ → Polls ALL queues                                                  │ │  │  │
-│  │  │  │   • Default                                                         │ │  │  │
-│  │  │  │   • Long-Running                                                    │ │  │  │
-│  │  │  │   • Priority                                                        │ │  │  │
+│  │  │  │ Worker for Gitleaks                                                 │ │  │  │
+│  │  │  │ SCAN_TYPE=GITLEAKS_SECRETS (or GITLEAKS_FILE_HASH)                  │ │  │  │
+│  │  │  │ → Polls SECURITY_SCAN_TASK_QUEUE_GITLEAKS                           │ │  │  │
+│  │  │  └─────────────────────────────────────────────────────────────────────┘ │  │  │
+│  │  │  ┌─────────────────────────────────────────────────────────────────────┐ │  │  │
+│  │  │  │ Worker for BlackDuck                                                │ │  │  │
+│  │  │  │ SCAN_TYPE=BLACKDUCK_DETECT                                           │ │  │  │
+│  │  │  │ → Polls SECURITY_SCAN_TASK_QUEUE_BLACKDUCK                          │ │  │  │
 │  │  │  └─────────────────────────────────────────────────────────────────────┘ │  │  │
 │  │  │                                                                           │  │  │
-│  │  │  Option 2: Separate Workers                                              │  │  │
-│  │  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                  │  │  │
-│  │  │  │ Worker-1     │  │ Worker-2     │  │ Worker-3     │                  │  │  │
-│  │  │  │ TASK_QUEUES= │  │ TASK_QUEUES= │  │ TASK_QUEUES= │                  │  │  │
-│  │  │  │ DEFAULT      │  │ LONG_RUNNING │  │ PRIORITY     │                  │  │  │
-│  │  │  │              │  │              │  │              │                  │  │  │
-│  │  │  │ Polls:       │  │ Polls:       │  │ Polls:       │                  │  │  │
-│  │  │  │ • Default    │  │ • Long-Run   │  │ • Priority   │                  │  │  │
-│  │  │  └──────────────┘  └──────────────┘  └──────────────┘                  │  │  │
+│  │  │  Option 2: Multi-Queue Worker (Fallback)                                  │  │  │
+│  │  │  ┌─────────────────────────────────────────────────────────────────────┐ │  │  │
+│  │  │  │ SecurityScanWorker                                                  │ │  │  │
+│  │  │  │ SCAN_TYPE: (not set)                                                │ │  │  │
+│  │  │  │ → Polls ALL scan-type queues                                        │ │  │  │
+│  │  │  │   • Gitleaks                                                        │ │  │  │
+│  │  │  │   • BlackDuck                                                       │ │  │  │
+│  │  │  │   • Default (fallback)                                             │ │  │  │
+│  │  │  └─────────────────────────────────────────────────────────────────────┘ │  │  │
 │  │  └─────────────────────────────────────────────────────────────────────────┘  │  │
 │  │                                                                                 │  │
 │  │  ┌─────────────────────────────────────────────────────────────────────────┐  │  │
@@ -185,14 +202,25 @@
 │   Client    │
 │  Submits    │
 │   Scan      │
+│             │
+│  appId: app-123
+│  component: api
+│  buildId: build-456
+│  toolType: GITLEAKS_SECRETS
 └──────┬──────┘
        │
-       │ ScanRequest + ScanConfig
+       │ ScanRequest
+       │ + appId, component, buildId, toolType
        │
        ▼
 ┌─────────────────────────────────┐
 │  SecurityScanClient              │
 │  determineTaskQueue()            │
+│  generateWorkflowId()            │
+│                                  │
+│  Workflow ID:                    │
+│  app-123-api-build-456-          │
+│  gitleaks-secrets                │
 └──────┬──────────────────────────┘
        │
        │ Queue Selection Logic:
@@ -201,12 +229,12 @@
        │   YES → Use that queue
        │   NO  ↓
        │
-       ├─→ Priority = HIGH?
-       │   YES → SECURITY_SCAN_TASK_QUEUE_PRIORITY
+       ├─→ Tool Type = GITLEAKS?
+       │   YES → SECURITY_SCAN_TASK_QUEUE_GITLEAKS
        │   NO  ↓
        │
-       ├─→ Timeout > 30 min OR Workflow > 1 hour?
-       │   YES → SECURITY_SCAN_TASK_QUEUE_LONG_RUNNING
+       ├─→ Tool Type = BLACKDUCK?
+       │   YES → SECURITY_SCAN_TASK_QUEUE_BLACKDUCK
        │   NO  ↓
        │
        └─→ SECURITY_SCAN_TASK_QUEUE_DEFAULT
@@ -216,46 +244,59 @@
 ┌─────────────────────────────────┐
 │  Temporal Service                │
 │  Workflow Started                │
-│  Task Queued                     │
+│  Workflow ID: app-123-api-       │
+│    build-456-gitleaks-secrets    │
+│  Task Queued to:                 │
+│    SECURITY_SCAN_TASK_QUEUE_     │
+│    GITLEAKS                      │
 └─────────────────────────────────┘
 ```
 
-### 2. Worker Task Picking Flow
+### 2. Worker Task Picking Flow (Scan-Type Based)
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  Temporal Service                                        │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │
-│  │ DEFAULT      │  │ LONG-RUN    │  │ PRIORITY     │   │
-│  │ QUEUE        │  │ QUEUE       │  │ QUEUE        │   │
-│  │              │  │              │  │              │   │
-│  │ [Task 1]     │  │ [Task 5]     │  │ [Task 8]     │   │
-│  │ [Task 2]     │  │ [Task 6]     │  │ [Task 9]     │   │
-│  │ [Task 3]     │  │              │  │              │   │
-│  │ [Task 4]     │  │              │  │              │   │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘   │
-│         │                 │                 │            │
-│         └─────────────────┼─────────────────┘            │
-│                           │                              │
-└───────────────────────────┼──────────────────────────────┘
-                            │
-                            │ Polling
-                            │
-        ┌───────────────────┼───────────────────┐
-        │                   │                   │
-        ▼                   ▼                   ▼
-┌──────────────┐   ┌──────────────┐   ┌──────────────┐
-│ Worker-1     │   │ Worker-2     │   │ Worker-3     │
-│              │   │              │   │              │
-│ Polls:       │   │ Polls:       │   │ Polls:        │
-│ • Default    │   │ • Long-Run   │   │ • Priority    │
-│ • Long-Run   │   │              │   │               │
-│ • Priority   │   │              │   │               │
-│              │   │              │   │               │
-│ Picks:       │   │ Picks:       │   │ Picks:        │
-│ Task 1       │   │ Task 5       │   │ Task 8        │
-│ Task 2       │   │ Task 6       │   │ Task 9        │
-└──────┬───────┘   └──────┬───────┘   └──────┬───────┘
+│  ┌──────────────────────┐  ┌──────────────────────┐     │
+│  │ GITLEAKS QUEUE      │  │ BLACKDUCK QUEUE       │     │
+│  │                     │  │                      │     │
+│  │ [app-123-api-       │  │ [app-456-ui-         │     │
+│  │  build-789-         │  │  build-101-          │     │
+│  │  gitleaks-secrets]  │  │  blackduck-detect]   │     │
+│  │                     │  │                      │     │
+│  │ [app-123-api-       │  │ [app-789-backend-    │     │
+│  │  build-790-         │  │  build-202-          │     │
+│  │  gitleaks-file-     │  │  blackduck-detect]   │     │
+│  │  hash]              │  │                      │     │
+│  └──────┬──────────────┘  └──────┬───────────────┘     │
+│         │                        │                     │
+│         └────────────┬───────────┘                     │
+│                      │                                  │
+└──────────────────────┼──────────────────────────────────┘
+                       │
+                       │ Polling
+                       │
+        ┌──────────────┼──────────────┐
+        │              │              │
+        ▼              ▼              ▼
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+│ Gitleaks     │  │ BlackDuck    │  │ Default      │
+│ Worker       │  │ Worker       │  │ Worker       │
+│              │  │              │  │ (Fallback)   │
+│ SCAN_TYPE=   │  │ SCAN_TYPE=   │  │              │
+│ GITLEAKS_    │  │ BLACKDUCK_   │  │              │
+│ SECRETS      │  │ DETECT       │  │              │
+│              │  │              │  │              │
+│ Polls:       │  │ Polls:       │  │ Polls:       │
+│ • Gitleaks   │  │ • BlackDuck  │  │ • Default    │
+│   Queue      │  │   Queue      │  │   Queue      │
+│              │  │              │  │              │
+│ Picks:       │  │ Picks:       │  │ Picks:       │
+│ app-123-api- │  │ app-456-ui-  │  │ (Fallback)   │
+│ build-789-   │  │ build-101-    │  │              │
+│ gitleaks-    │  │ blackduck-   │  │              │
+│ secrets      │  │ detect        │  │              │
+└──────┬───────┘  └──────┬───────┘  └──────┬───────┘
        │                  │                  │
        │ Execute          │ Execute          │ Execute
        │ Workflow         │ Workflow         │ Workflow
@@ -263,8 +304,9 @@
        ▼                  ▼                  ▼
 ┌─────────────────────────────────────────────────────┐
 │  Workflow Execution                                 │
+│  Workflow ID: app-123-api-build-789-gitleaks-secrets│
 │  • Clone Repository (shared PVC)                    │
-│  • Run Scans                                        │
+│  • Run Single Scan (toolType)                       │
 │  • Store Results                                    │
 └─────────────────────────────────────────────────────┘
 ```
@@ -357,9 +399,9 @@
 │  (Auto-detect)   │
 └──────┬───────────┘
        │
-       ├─→ Priority Queue
-       ├─→ Long-Running Queue
-       └─→ Default Queue
+       ├─→ Gitleaks Queue
+       ├─→ BlackDuck Queue
+       └─→ Default Queue (fallback)
        
        │
        ▼
@@ -412,7 +454,7 @@
 
 ### 1. Queue Routing
 - **Location**: `SecurityScanClient.determineTaskQueue()`
-- **Logic**: Priority-based → Timeout-based → Default
+- **Logic**: Scan-type based → Default
 - **Result**: Workflow routed to appropriate queue
 
 ### 2. Worker Polling

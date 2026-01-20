@@ -2,15 +2,11 @@ package securityscanapp;
 
 import io.temporal.activity.ActivityOptions;
 import io.temporal.common.RetryOptions;
-import io.temporal.workflow.Async;
-import io.temporal.workflow.Promise;
 import io.temporal.workflow.Workflow;
 
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Implementation of the security scanning workflow
@@ -87,6 +83,14 @@ public class SecurityScanWorkflowImpl implements SecurityScanWorkflow {
         summary.setRepositoryUrl(request.getRepositoryUrl());
         summary.setCommitSha(request.getCommitSha());
         
+        // Set new structure fields if available
+        if (request.getAppId() != null) {
+            summary.setAppId(request.getAppId());
+            summary.setComponent(request.getComponent());
+            summary.setBuildId(request.getBuildId());
+            summary.setToolType(request.getToolType());
+        }
+        
         ScanConfig config = request.getScanConfig();
         
         // Apply workflow-level timeout if configured
@@ -106,17 +110,18 @@ public class SecurityScanWorkflowImpl implements SecurityScanWorkflow {
             // Cleanup only happens after all activities complete successfully
             repoPath = repositoryActivity.cloneRepository(request);
             
-            // Step 2: Execute scans based on requested scan types
-            List<ScanResult> scanResults;
-            boolean executeInParallel = config != null && config.isExecuteScansInParallel();
+            // Step 2: Execute scan for the single tool type
+            // Each workflow execution handles one scan type (tool type)
+            List<ScanResult> scanResults = new ArrayList<>();
             
-            if (executeInParallel) {
-                // Execute all scans in parallel
-                scanResults = executeScansInParallel(request.getScanTypes(), repoPath, config);
-            } else {
-                // Execute scans sequentially (space-efficient, default)
-                scanResults = executeScansSequentially(request.getScanTypes(), repoPath, config);
+            ScanType toolType = request.getToolType();
+            if (toolType == null) {
+                throw new IllegalArgumentException("Tool type (scan type) must be specified in ScanRequest");
             }
+            
+            // Execute single scan for the tool type
+            ScanResult scanResult = executeSingleScan(toolType, repoPath, request);
+            scanResults.add(scanResult);
             
             // Add all results to summary
             for (ScanResult result : scanResults) {
@@ -261,64 +266,12 @@ public class SecurityScanWorkflowImpl implements SecurityScanWorkflow {
     }
     
     /**
-     * Execute scans sequentially (one after another)
-     * Space-efficient: uses single repository clone
-     */
-    private List<ScanResult> executeScansSequentially(
-            List<ScanType> scanTypes, String repoPath, ScanConfig config) {
-        
-        List<ScanResult> scanResults = new ArrayList<>();
-        
-        for (ScanType scanType : scanTypes) {
-            try {
-                ScanResult result = executeSingleScan(scanType, repoPath, config);
-                scanResults.add(result);
-            } catch (Exception e) {
-                // Create error result for failed scan
-                ScanResult errorResult = new ScanResult(scanType, false);
-                errorResult.setErrorMessage("Scan failed: " + e.getMessage());
-                scanResults.add(errorResult);
-            }
-        }
-        
-        return scanResults;
-    }
-    
-    /**
-     * Execute scans in parallel using Temporal's Async API
-     * All scans run simultaneously on the same repository clone
-     * Note: Ensure scanning tools support concurrent execution on the same repo
-     */
-    private List<ScanResult> executeScansInParallel(
-            List<ScanType> scanTypes, String repoPath, ScanConfig config) {
-        
-        // Create a map to track promises by scan type
-        Map<ScanType, Promise<ScanResult>> promises = new HashMap<>();
-        
-        // Start all scans asynchronously
-        for (ScanType scanType : scanTypes) {
-            Promise<ScanResult> promise = Async.function(() -> 
-                executeSingleScanWithErrorHandling(scanType, repoPath, config)
-            );
-            promises.put(scanType, promise);
-        }
-        
-        // Wait for all scans to complete and collect results
-        List<ScanResult> scanResults = new ArrayList<>();
-        for (ScanType scanType : scanTypes) {
-            Promise<ScanResult> promise = promises.get(scanType);
-            ScanResult result = promise.get(); // Blocks until this scan completes
-            scanResults.add(result);
-        }
-        
-        return scanResults;
-    }
-    
-    /**
      * Execute a single scan based on scan type
      * Uses configurable timeout if provided in config
      */
-    private ScanResult executeSingleScan(ScanType scanType, String repoPath, ScanConfig config) {
+    private ScanResult executeSingleScan(ScanType scanType, String repoPath, ScanRequest request) {
+        ScanConfig config = request.getScanConfig();
+        
         // Use configurable timeout if provided, otherwise use default
         int timeoutSeconds = (config != null && config.getScanTimeoutSeconds() != null) 
             ? config.getScanTimeoutSeconds() 
@@ -342,27 +295,13 @@ public class SecurityScanWorkflowImpl implements SecurityScanWorkflow {
                 return gitleaksStub.scanFileHash(repoPath, config);
                 
             case BLACKDUCK_DETECT:
-                return blackduckStub.scanSignatures(repoPath, config);
+                // Pass the full request to BlackDuck activity (includes BlackDuckConfig)
+                return blackduckStub.scanSignatures(repoPath, request);
                 
             default:
                 ScanResult result = new ScanResult(scanType, false);
                 result.setErrorMessage("Unsupported scan type: " + scanType);
                 return result;
-        }
-    }
-    
-    /**
-     * Execute a single scan with error handling
-     * Used for parallel execution to ensure all scans complete even if one fails
-     */
-    private ScanResult executeSingleScanWithErrorHandling(ScanType scanType, String repoPath, ScanConfig config) {
-        try {
-            return executeSingleScan(scanType, repoPath, config);
-        } catch (Exception e) {
-            // Create error result for failed scan
-            ScanResult errorResult = new ScanResult(scanType, false);
-            errorResult.setErrorMessage("Scan failed: " + e.getMessage());
-            return errorResult;
         }
     }
     

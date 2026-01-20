@@ -410,6 +410,9 @@ Set up monitoring dashboards for:
 
 ## Documentation
 
+- [APPLICATION_STRUCTURE.md](APPLICATION_STRUCTURE.md): **Application structure** - appId, component, buildId, toolType structure and usage
+- [SCAN_CLIENTS.md](SCAN_CLIENTS.md): **Scan orchestrator clients** - How to use dedicated clients for each scan type
+- [BLACKDUCK_IMPLEMENTATION.md](BLACKDUCK_IMPLEMENTATION.md): **BlackDuck scan implementation** - Hub URL determination, rapid scan support, and Detect script usage
 - [ARCHITECTURE_DIAGRAM.md](ARCHITECTURE_DIAGRAM.md): **Visual architecture diagrams** - routing, task picking, failure handling, and restart service
 - [ARCHITECTURE_EXPLANATION.md](ARCHITECTURE_EXPLANATION.md): How the application works - architecture, execution flow, and components
 - [PARALLEL_EXECUTION.md](PARALLEL_EXECUTION.md): How parallel scan execution works
