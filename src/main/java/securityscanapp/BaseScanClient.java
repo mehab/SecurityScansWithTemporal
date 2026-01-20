@@ -140,7 +140,7 @@ public abstract class BaseScanClient {
         ScanSummary summary = workflow.executeScans(request);
         
         System.out.println("Workflow completed");
-        System.out.println("All scans successful: " + summary.isAllScansSuccessful());
+                    System.out.println("Scan successful: " + summary.isAllScansSuccessful());
         System.out.println("Total execution time: " + summary.getTotalExecutionTimeMs() + " ms");
         System.out.println();
         

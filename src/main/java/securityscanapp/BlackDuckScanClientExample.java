@@ -59,7 +59,7 @@ public class BlackDuckScanClientExample {
             // Process results
             System.out.println("\n=== BlackDuck Scan Summary ===");
             System.out.println("Scan ID: " + summary.getScanId());
-            System.out.println("All Scans Successful: " + summary.isAllScansSuccessful());
+                        System.out.println("Scan Successful: " + summary.isAllScansSuccessful());
             System.out.println("Total Execution Time: " + summary.getTotalExecutionTimeMs() + " ms");
             
             for (ScanResult result : summary.getScanResults()) {

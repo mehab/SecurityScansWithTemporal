@@ -4,7 +4,6 @@ import io.temporal.client.WorkflowClient;
 import io.temporal.client.WorkflowOptions;
 import io.temporal.serviceclient.WorkflowServiceStubs;
 
-import java.util.Arrays;
 
 /**
  * Client application to initiate security scans
@@ -72,12 +71,14 @@ public class SecurityScanClient {
             
             System.out.println("\n=== Scan Summary ===");
             System.out.println("Scan ID: " + summary.getScanId());
-            System.out.println("All Scans Successful: " + summary.isAllScansSuccessful());
+            System.out.println("Scan Successful: " + summary.isAllScansSuccessful());
             System.out.println("Total Execution Time: " + summary.getTotalExecutionTimeMs() + " ms");
-            System.out.println("\n=== Individual Scan Results ===");
+            System.out.println("\n=== Scan Result ===");
             
-            for (ScanResult result : summary.getScanResults()) {
-                System.out.println("\nScan Type: " + result.getScanType());
+            // Currently only one scan result (BlackDuck)
+            if (!summary.getScanResults().isEmpty()) {
+                ScanResult result = summary.getScanResults().get(0);
+                System.out.println("Scan Type: " + result.getScanType());
                 System.out.println("Success: " + result.isSuccess());
                 System.out.println("Execution Time: " + result.getExecutionTimeMs() + " ms");
                 if (result.getErrorMessage() != null) {
@@ -121,9 +122,7 @@ public class SecurityScanClient {
         // config.addSparseCheckoutPath("*.java");
         // config.addSparseCheckoutPath("*.js");
         
-        // Enable parallel execution for faster scans (uses more resources but same repo space)
-        // Set to false for sequential execution (space-efficient, default)
-        config.setExecuteScansInParallel(false); // Change to true for parallel execution
+        // Note: Parallel execution is not applicable since only one scan type (BlackDuck) is supported
         
         // Configure timeouts
         // Option 1: Set per-scan timeout (default is 30 minutes)

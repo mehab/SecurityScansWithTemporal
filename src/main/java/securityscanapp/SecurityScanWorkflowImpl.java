@@ -5,13 +5,14 @@ import io.temporal.common.RetryOptions;
 import io.temporal.workflow.Workflow;
 
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * Implementation of the security scanning workflow
- * Orchestrates repository cloning, multiple scan types, and cleanup
+ * Orchestrates repository cloning, BlackDuck Detect scan, and cleanup
  * Designed for space-efficient execution on Kubernetes with limited PVC storage
+ * 
+ * Each workflow execution handles a single BlackDuck Detect scan.
+ * The structure is designed to support additional scan types in the future.
  */
 public class SecurityScanWorkflowImpl implements SecurityScanWorkflow {
     
@@ -107,39 +108,32 @@ public class SecurityScanWorkflowImpl implements SecurityScanWorkflow {
             // Cleanup only happens after all activities complete successfully
             repoPath = repositoryActivity.cloneRepository(request);
             
-            // Step 2: Execute scan for the single tool type
-            // Each workflow execution handles one scan type (tool type)
-            List<ScanResult> scanResults = new ArrayList<>();
-            
+            // Step 2: Execute BlackDuck Detect scan
+            // Each workflow execution handles a single scan
             ScanType toolType = request.getToolType();
             if (toolType == null) {
                 throw new IllegalArgumentException("Tool type (scan type) must be specified in ScanRequest");
             }
             
-            // Execute single scan for the tool type
+            // Execute scan
             ScanResult scanResult = executeSingleScan(toolType, repoPath, request);
-            scanResults.add(scanResult);
-            
-            // Add all results to summary
-            for (ScanResult result : scanResults) {
-                summary.addScanResult(result);
-            }
+            summary.addScanResult(scanResult);
             
             // Step 3: Determine overall success
-            boolean allSuccessful = scanResults.stream().allMatch(ScanResult::isSuccess);
+            boolean allSuccessful = scanResult.isSuccess();
             summary.setAllScansSuccessful(allSuccessful);
             
             // Step 4: Final cleanup
-            // Repository is cleaned up ONLY after all scans complete successfully
-            // If any scan fails, cleanup is deferred (repository remains for investigation/retry)
+            // Repository is cleaned up ONLY after scan completes successfully
+            // If scan fails, cleanup is deferred (repository remains for investigation/retry)
             // During activity retries (pod failures), repository remains on shared storage
             // This ensures retries can access the same cloned repository
             if (allSuccessful && repoPath != null && request.getWorkspacePath() != null) {
                 repositoryActivity.cleanupWorkspace(request.getWorkspacePath());
             } else if (!allSuccessful) {
-                // If scans failed, keep repository for investigation
+                // If scan failed, keep repository for investigation
                 // Repository will be cleaned up manually or by a separate cleanup process
-                summary.addMetadata("cleanupDeferred", "Repository retained due to scan failures");
+                summary.addMetadata("cleanupDeferred", "Repository retained due to scan failure");
             }
             
             long totalExecutionTime = System.currentTimeMillis() - workflowStartTime;
@@ -152,19 +146,15 @@ public class SecurityScanWorkflowImpl implements SecurityScanWorkflow {
                     summary.addMetadata("storagePath", storagePath);
                     
                     // Store individual report files if configured
+                    // Currently only BlackDuck reports are stored
                     if (config.getStorageConfig().isStoreReportFiles()) {
-                        // Store BlackDuck reports
-                        for (ScanResult result : scanResults) {
-                            if (result.getScanType() == ScanType.BLACKDUCK_DETECT) {
-                                String reportPath = request.getWorkspacePath() + "/blackduck-output";
-                                storageActivity.storeReportFile(
-                                    request.getScanId(),
-                                    reportPath,
-                                    "blackduck-detect",
-                                    config.getStorageConfig()
-                                );
-                            }
-                        }
+                        String reportPath = request.getWorkspacePath() + "/blackduck-output";
+                        storageActivity.storeReportFile(
+                            request.getScanId(),
+                            reportPath,
+                            "blackduck-detect",
+                            config.getStorageConfig()
+                        );
                     }
                 } catch (Exception e) {
                     // Non-fatal: log but don't fail workflow
@@ -256,6 +246,9 @@ public class SecurityScanWorkflowImpl implements SecurityScanWorkflow {
     /**
      * Execute a single scan based on scan type
      * Uses configurable timeout if provided in config
+     * 
+     * Currently only supports BLACKDUCK_DETECT.
+     * Structure supports adding additional scan types in the future.
      */
     private ScanResult executeSingleScan(ScanType scanType, String repoPath, ScanRequest request) {
         ScanConfig config = request.getScanConfig();
@@ -273,6 +266,8 @@ public class SecurityScanWorkflowImpl implements SecurityScanWorkflow {
             blackduckStub = Workflow.newActivityStub(BlackDuckScanActivity.class, customOptions);
         }
         
+        // Currently only BlackDuck is supported
+        // Switch statement structure allows adding new scan types in the future
         switch (scanType) {
             case BLACKDUCK_DETECT:
                 // Pass the full request to BlackDuck activity (includes BlackDuckConfig)
@@ -280,7 +275,7 @@ public class SecurityScanWorkflowImpl implements SecurityScanWorkflow {
                 
             default:
                 ScanResult result = new ScanResult(scanType, false);
-                result.setErrorMessage("Unsupported scan type: " + scanType);
+                result.setErrorMessage("Unsupported scan type: " + scanType + ". Currently only BLACKDUCK_DETECT is supported.");
                 return result;
         }
     }

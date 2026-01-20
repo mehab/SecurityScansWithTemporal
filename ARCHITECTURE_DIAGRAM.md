@@ -6,11 +6,13 @@ Each scan request is structured as:
 - **Application ID (appId)**: Identifies the application
 - **Component**: Component within the application
 - **Build ID (buildId)**: Unique build identifier for the component
-- **Tool Type**: Single scan type (Gitleaks, BlackDuck, etc.)
+- **Tool Type**: Single scan type (BlackDuck, etc.)
 
 **Workflow ID Format**: `{appId}-{component}-{buildId}-{toolType}`
 
-Example: `app-123-api-component-build-456-gitleaks-secrets`
+Example: `app-123-api-component-build-456-blackduck-detect`
+
+**Note**: The application structure is designed to support multiple scan types. Currently only BlackDuck Detect is implemented, but additional scan types can be added in the future.
 
 ## High-Level Architecture Overview
 
@@ -44,21 +46,20 @@ Example: `app-123-api-component-build-456-gitleaks-secrets`
 │                          │                                 │                        │
 │                          │  1. Explicit queue? → Use it   │                        │
 │                          │  2. Tool Type → Scan-type queue│                        │
-│                          │     • Gitleaks → GITLEAKS queue│                        │
 │                          │     • BlackDuck → BLACKDUCK   │                        │
 │                          │  3. Default → Default queue    │                        │
 │                          └───────────────┬────────────────┘                        │
 │                                          │                                          │
 │              ┌───────────────────────────┼───────────────────────────┐            │
 │              │                           │                           │            │
-│    ┌─────────▼─────────┐    ┌───────────▼──────────┐    ┌───────────▼──────────┐ │
-│    │ GITLEAKS QUEUE     │    │ BLACKDUCK QUEUE       │    │ DEFAULT QUEUE         │ │
-│    │ (Gitleaks scans)   │    │ (BlackDuck scans)     │    │ (Fallback)            │ │
-│    │                    │    │                      │    │                      │ │
-│    │ SECURITY_SCAN_     │    │ SECURITY_SCAN_       │    │ SECURITY_SCAN_       │ │
-│    │ TASK_QUEUE_        │    │ TASK_QUEUE_           │    │ TASK_QUEUE           │ │
-│    │ GITLEAKS           │    │ BLACKDUCK             │    │                      │ │
-│    └─────────┬─────────┘    └───────────┬──────────┘    └───────────┬──────────┘ │
+│    ┌─────────▼─────────┐    ┌───────────▼──────────┐                │            │
+│    │ BLACKDUCK QUEUE   │    │ DEFAULT QUEUE         │                │            │
+│    │ (BlackDuck scans) │    │ (Fallback)            │                │            │
+│    │                   │    │                      │                │            │
+│    │ SECURITY_SCAN_    │    │ SECURITY_SCAN_        │                │            │
+│    │ TASK_QUEUE_       │    │ TASK_QUEUE            │                │            │
+│    │ BLACKDUCK         │    │                      │                │            │
+│    └─────────┬─────────┘    └───────────┬──────────┘                │            │
 │              │                           │                           │            │
 │              └───────────────────────────┼───────────────────────────┘            │
 │                                          │                                          │
@@ -75,11 +76,6 @@ Example: `app-123-api-component-build-456-gitleaks-secrets`
 │  │  │                                                                           │  │  │
 │  │  │  Option 1: Scan-Type Specific Workers (Recommended)                     │  │  │
 │  │  │  ┌─────────────────────────────────────────────────────────────────────┐ │  │  │
-│  │  │  │ Worker for Gitleaks                                                 │ │  │  │
-│  │  │  │ SCAN_TYPE=GITLEAKS_SECRETS (or GITLEAKS_FILE_HASH)                  │ │  │  │
-│  │  │  │ → Polls SECURITY_SCAN_TASK_QUEUE_GITLEAKS                           │ │  │  │
-│  │  │  └─────────────────────────────────────────────────────────────────────┘ │  │  │
-│  │  │  ┌─────────────────────────────────────────────────────────────────────┐ │  │  │
 │  │  │  │ Worker for BlackDuck                                                │ │  │  │
 │  │  │  │ SCAN_TYPE=BLACKDUCK_DETECT                                           │ │  │  │
 │  │  │  │ → Polls SECURITY_SCAN_TASK_QUEUE_BLACKDUCK                          │ │  │  │
@@ -90,7 +86,6 @@ Example: `app-123-api-component-build-456-gitleaks-secrets`
 │  │  │  │ SecurityScanWorker                                                  │ │  │  │
 │  │  │  │ SCAN_TYPE: (not set)                                                │ │  │  │
 │  │  │  │ → Polls ALL scan-type queues                                        │ │  │  │
-│  │  │  │   • Gitleaks                                                        │ │  │  │
 │  │  │  │   • BlackDuck                                                       │ │  │  │
 │  │  │  │   • Default (fallback)                                             │ │  │  │
 │  │  │  └─────────────────────────────────────────────────────────────────────┘ │  │  │
@@ -105,7 +100,7 @@ Example: `app-123-api-component-build-456-gitleaks-secrets`
 │  │  │  │ 2. Receives workflow task → Executes SecurityScanWorkflow          │ │  │  │
 │  │  │  │ 3. Workflow orchestrates activities:                                │ │  │  │
 │  │  │  │    • Clone Repository (RepositoryActivity)                          │ │  │  │
-│  │  │  │    • Run Scans (GitleaksScanActivity, BlackDuckScanActivity)       │ │  │  │
+│  │  │  │    • Run Scan (BlackDuckScanActivity)                              │ │  │  │
 │  │  │  │    • Store Results (StorageActivity)                                │ │  │  │
 │  │  │  │ 4. Activities execute on worker pod (can be different pods)        │ │  │  │
 │  │  │  │ 5. All pods share same PVC (ReadWriteMany) for repository access   │ │  │  │
@@ -206,7 +201,7 @@ Example: `app-123-api-component-build-456-gitleaks-secrets`
 │  appId: app-123
 │  component: api
 │  buildId: build-456
-│  toolType: GITLEAKS_SECRETS
+│  toolType: BLACKDUCK_DETECT
 └──────┬──────┘
        │
        │ ScanRequest
@@ -220,17 +215,13 @@ Example: `app-123-api-component-build-456-gitleaks-secrets`
 │                                  │
 │  Workflow ID:                    │
 │  app-123-api-build-456-          │
-│  gitleaks-secrets                │
+│  blackduck-detect                │
 └──────┬──────────────────────────┘
        │
        │ Queue Selection Logic:
        │
        ├─→ Explicit queue set?
        │   YES → Use that queue
-       │   NO  ↓
-       │
-       ├─→ Tool Type = GITLEAKS?
-       │   YES → SECURITY_SCAN_TASK_QUEUE_GITLEAKS
        │   NO  ↓
        │
        ├─→ Tool Type = BLACKDUCK?
@@ -245,10 +236,10 @@ Example: `app-123-api-component-build-456-gitleaks-secrets`
 │  Temporal Service                │
 │  Workflow Started                │
 │  Workflow ID: app-123-api-       │
-│    build-456-gitleaks-secrets    │
+│    build-456-blackduck-detect    │
 │  Task Queued to:                 │
 │    SECURITY_SCAN_TASK_QUEUE_     │
-│    GITLEAKS                      │
+│    BLACKDUCK                     │
 └─────────────────────────────────┘
 ```
 
@@ -258,17 +249,16 @@ Example: `app-123-api-component-build-456-gitleaks-secrets`
 ┌─────────────────────────────────────────────────────────┐
 │  Temporal Service                                        │
 │  ┌──────────────────────┐  ┌──────────────────────┐     │
-│  │ GITLEAKS QUEUE      │  │ BLACKDUCK QUEUE       │     │
-│  │                     │  │                      │     │
-│  │ [app-123-api-       │  │ [app-456-ui-         │     │
-│  │  build-789-         │  │  build-101-          │     │
-│  │  gitleaks-secrets]  │  │  blackduck-detect]   │     │
-│  │                     │  │                      │     │
-│  │ [app-123-api-       │  │ [app-789-backend-    │     │
-│  │  build-790-         │  │  build-202-          │     │
-│  │  gitleaks-file-     │  │  blackduck-detect]   │     │
-│  │  hash]              │  │                      │     │
-│  └──────┬──────────────┘  └──────┬───────────────┘     │
+│  │ BLACKDUCK QUEUE      │  │ DEFAULT QUEUE        │     │
+│  │                      │  │ (Fallback)           │     │
+│  │ [app-456-ui-         │  │                      │     │
+│  │  build-101-          │  │                      │     │
+│  │  blackduck-detect]   │  │                      │     │
+│  │                      │  │                      │     │
+│  │ [app-789-backend-    │  │                      │     │
+│  │  build-202-          │  │                      │     │
+│  │  blackduck-detect]   │  │                      │     │
+│  └──────┬───────────────┘  └──────┬───────────────┘     │
 │         │                        │                     │
 │         └────────────┬───────────┘                     │
 │                      │                                  │
@@ -280,34 +270,34 @@ Example: `app-123-api-component-build-456-gitleaks-secrets`
         │              │              │
         ▼              ▼              ▼
 ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│ Gitleaks     │  │ BlackDuck    │  │ Default      │
-│ Worker       │  │ Worker       │  │ Worker       │
-│              │  │              │  │ (Fallback)   │
-│ SCAN_TYPE=   │  │ SCAN_TYPE=   │  │              │
-│ GITLEAKS_    │  │ BLACKDUCK_   │  │              │
-│ SECRETS      │  │ DETECT       │  │              │
+│ BlackDuck    │  │ Default      │  │              │
+│ Worker       │  │ Worker       │  │              │
+│              │  │ (Fallback)   │  │              │
+│ SCAN_TYPE=   │  │              │  │              │
+│ BLACKDUCK_   │  │              │  │              │
+│ DETECT       │  │              │  │              │
 │              │  │              │  │              │
-│ Polls:       │  │ Polls:       │  │ Polls:       │
-│ • Gitleaks   │  │ • BlackDuck  │  │ • Default    │
-│   Queue      │  │   Queue      │  │   Queue      │
+│ Polls:       │  │ Polls:       │  │              │
+│ • BlackDuck  │  │ • Default    │  │              │
+│   Queue      │  │   Queue      │  │              │
 │              │  │              │  │              │
-│ Picks:       │  │ Picks:       │  │ Picks:       │
-│ app-123-api- │  │ app-456-ui-  │  │ (Fallback)   │
-│ build-789-   │  │ build-101-    │  │              │
-│ gitleaks-    │  │ blackduck-   │  │              │
-│ secrets      │  │ detect        │  │              │
-└──────┬───────┘  └──────┬───────┘  └──────┬───────┘
-       │                  │                  │
-       │ Execute          │ Execute          │ Execute
-       │ Workflow         │ Workflow         │ Workflow
-       │                  │                  │
-       ▼                  ▼                  ▼
+│ Picks:       │  │ Picks:       │  │              │
+│ app-456-ui-  │  │ (Fallback)   │  │              │
+│ build-101-   │  │              │  │              │
+│ blackduck-   │  │              │  │              │
+│ detect       │  │              │  │              │
+└──────┬───────┘  └──────┬───────┘  └──────────────┘
+       │                  │
+       │ Execute          │ Execute
+       │ Workflow         │ Workflow
+       │                  │
+       ▼                  ▼
 ┌─────────────────────────────────────────────────────┐
 │  Workflow Execution                                 │
-│  Workflow ID: app-123-api-build-789-gitleaks-secrets│
-│  • Clone Repository (shared PVC)                    │
-│  • Run Single Scan (toolType)                       │
-│  • Store Results                                    │
+│  Workflow ID: app-456-ui-build-101-blackduck-detect │
+│  • Clone Repository (shared PVC)                     │
+│  • Run BlackDuck Scan                                │
+│  • Store Results                                     │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -399,7 +389,6 @@ Example: `app-123-api-component-build-456-gitleaks-secrets`
 │  (Auto-detect)   │
 └──────┬───────────┘
        │
-       ├─→ Gitleaks Queue
        ├─→ BlackDuck Queue
        └─→ Default Queue (fallback)
        
@@ -465,7 +454,7 @@ Example: `app-123-api-component-build-456-gitleaks-secrets`
 
 ### 3. Task Execution
 - **Workflow**: `SecurityScanWorkflowImpl`
-- **Activities**: Repository, Gitleaks, BlackDuck, Storage
+- **Activities**: Repository, BlackDuck, Storage
 - **Storage**: Shared PVC (ReadWriteMany) across all pods
 
 ### 4. Failure Detection

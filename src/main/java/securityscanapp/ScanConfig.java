@@ -9,14 +9,14 @@ import java.util.List;
 public class ScanConfig {
     private String gitUsername;
     private String gitPassword; // Should use secure credential management in production
-    private String gitleaksConfigPath;
+    private String gitleaksConfigPath; // Deprecated: Gitleaks removed - kept for future extensibility
     private String blackduckApiToken;
     private String blackduckUrl;
     private String blackduckProjectName;
     private String blackduckProjectVersion;
-    private boolean cleanupAfterEachScan;
+    private boolean cleanupAfterEachScan; // Deprecated: Not used - cleanup happens after scan completion
     private long maxWorkspaceSizeBytes;
-    private boolean executeScansInParallel; // Whether to run scans in parallel
+    // Note: executeScansInParallel removed - not applicable with single scan type
     private CloneStrategy cloneStrategy; // Strategy for cloning large repos
     private int shallowCloneDepth; // Depth for shallow clone (1 = only latest commit)
     private boolean useSparseCheckout; // Use sparse checkout for large repos
@@ -27,9 +27,8 @@ public class ScanConfig {
     private String taskQueue; // Task queue name (null = auto-determined based on scan type)
     
     public ScanConfig() {
-        this.cleanupAfterEachScan = true; // Default to cleanup for space efficiency
+        this.cleanupAfterEachScan = true; // Deprecated: Not used - kept for backward compatibility
         this.maxWorkspaceSizeBytes = Shared.MAX_WORKSPACE_SIZE_BYTES;
-        this.executeScansInParallel = false; // Default to sequential for space efficiency
         this.cloneStrategy = CloneStrategy.SHALLOW; // Default to shallow for space efficiency
         this.shallowCloneDepth = 1; // Only latest commit by default
         this.useSparseCheckout = false; // Disabled by default
@@ -53,10 +52,18 @@ public class ScanConfig {
         this.gitPassword = gitPassword;
     }
     
+    /**
+     * @deprecated Gitleaks has been removed. Kept for future extensibility.
+     */
+    @Deprecated
     public String getGitleaksConfigPath() {
         return gitleaksConfigPath;
     }
     
+    /**
+     * @deprecated Gitleaks has been removed. Kept for future extensibility.
+     */
+    @Deprecated
     public void setGitleaksConfigPath(String gitleaksConfigPath) {
         this.gitleaksConfigPath = gitleaksConfigPath;
     }
@@ -93,10 +100,20 @@ public class ScanConfig {
         this.blackduckProjectVersion = blackduckProjectVersion;
     }
     
+    /**
+     * @deprecated This field is not used. Cleanup happens after scan completion.
+     * Kept for backward compatibility.
+     */
+    @Deprecated
     public boolean isCleanupAfterEachScan() {
         return cleanupAfterEachScan;
     }
     
+    /**
+     * @deprecated This field is not used. Cleanup happens after scan completion.
+     * Kept for backward compatibility.
+     */
+    @Deprecated
     public void setCleanupAfterEachScan(boolean cleanupAfterEachScan) {
         this.cleanupAfterEachScan = cleanupAfterEachScan;
     }
@@ -109,13 +126,7 @@ public class ScanConfig {
         this.maxWorkspaceSizeBytes = maxWorkspaceSizeBytes;
     }
     
-    public boolean isExecuteScansInParallel() {
-        return executeScansInParallel;
-    }
-    
-    public void setExecuteScansInParallel(boolean executeScansInParallel) {
-        this.executeScansInParallel = executeScansInParallel;
-    }
+    // Note: executeScansInParallel removed - not applicable with single scan type per workflow
     
     public CloneStrategy getCloneStrategy() {
         return cloneStrategy;

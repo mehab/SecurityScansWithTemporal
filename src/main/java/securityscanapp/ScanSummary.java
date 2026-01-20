@@ -6,7 +6,11 @@ import java.util.Map;
 import java.util.HashMap;
 
 /**
- * Summary of all scan results for a complete security scan execution
+ * Summary of scan results for a security scan execution
+ * 
+ * Currently contains a single scan result (BlackDuck Detect).
+ * The structure (List<ScanResult>) is maintained for future extensibility
+ * to support multiple scan types per workflow execution.
  */
 public class ScanSummary {
     private String scanId;
@@ -16,7 +20,7 @@ public class ScanSummary {
     private ScanType toolType; // Tool type (scan type)
     private String repositoryUrl;
     private String commitSha;
-    private boolean allScansSuccessful;
+    private boolean allScansSuccessful; // Success status (kept as "allScans" for backward compatibility, but represents single scan)
     private List<ScanResult> scanResults;
     private Map<String, Object> summary;
     private long totalExecutionTimeMs;

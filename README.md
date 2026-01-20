@@ -59,8 +59,8 @@ This project implements a distributed security scanning system that orchestrates
 
 1. **Repository Cloning**: Clone repository from SCM (Git) to workspace
 2. **Space Check**: Verify available space before operations (includes CLI tools, scan outputs, temp files)
-3. **Scan Execution**: Execute requested scan types (sequential or parallel, configurable)
-4. **Result Aggregation**: Collect and aggregate all scan results
+3. **Scan Execution**: Execute BlackDuck Detect scan on the cloned repository
+4. **Result Aggregation**: Collect scan results
 5. **External Storage**: Store scan results and reports to external storage (if configured)
 6. **Cleanup**: Remove workspace to free space (configurable)
 
@@ -69,33 +69,24 @@ This project implements a distributed security scanning system that orchestrates
 - **Workspace Isolation**: Each scan gets a unique workspace directory
 - **Automatic Cleanup**: Workspace is cleaned after scan completion
 - **Space Monitoring**: Check available space before cloning (accounts for CLI tools, outputs, temp files)
-- **Configurable Cleanup**: Option to cleanup after each scan type (space-efficient mode)
+- **Configurable Cleanup**: Option to cleanup after scan completion (space-efficient mode)
 - **CLI Tool Space**: Accounts for BlackDuck Detect JAR (~100MB) in space calculations
 
-### Execution Modes
+### Execution Model
 
-The system supports two execution modes:
-
-#### Sequential Execution (Default)
+The system executes a single BlackDuck Detect scan per workflow:
+- **Single Scan Per Workflow**: Each workflow execution handles one BlackDuck scan
 - **Space-efficient**: Uses single repository clone
-- **Lower resource usage**: Lower CPU/memory consumption
-- **Total time**: Sum of all scan execution times
-- **Best for**: Limited resources, space-constrained environments
+- **Isolated Execution**: Each scan runs in its own workspace directory
+- **Configurable Timeouts**: Set per-scan and workflow-level timeouts to prevent long-running scans
 
-#### Parallel Execution
-- **Faster**: All scans run simultaneously on the same repository
-- **Same space usage**: Uses single repository clone (no additional space)
-- **Total time**: Approximately the longest scan execution time
-- **Higher resource usage**: More CPU/memory required
-- **Best for**: When speed is critical and resources are available
-
-See [PARALLEL_EXECUTION.md](PARALLEL_EXECUTION.md) for detailed information on parallel execution.
+**Note**: The application structure is designed to support multiple scan types in the future. Currently, only BlackDuck Detect is implemented.
 
 ## Components
 
 ### Workflows
 
-- **SecurityScanWorkflow**: Main orchestration workflow that coordinates all scanning activities
+- **SecurityScanWorkflow**: Main orchestration workflow that coordinates BlackDuck Detect scanning
 
 ### Activities
 
@@ -111,7 +102,7 @@ See [PARALLEL_EXECUTION.md](PARALLEL_EXECUTION.md) for detailed information on p
 
 - **ScanRequest**: Contains repository information and scan configuration
 - **ScanResult**: Result of individual scan execution
-- **ScanSummary**: Aggregated results of all scans
+- **ScanSummary**: Summary of scan results
 - **ScanConfig**: Configuration for scans (credentials, paths, etc.)
 - **BlackDuckConfig**: BlackDuck-specific configuration (ALM, source system, transaction ID, hub URL, rapid scan settings)
 
@@ -263,7 +254,7 @@ Activities can run on different pods, so **shared storage is essential**. All wo
 
 - **Activities run on different pods**: Temporal dispatches activities to any available worker
 - **Shared storage needed**: Activities must access the same repository clone
-- **Parallel execution**: Multiple activities access the same files simultaneously
+- **Shared storage**: All activities access the same repository clone on shared storage
 - **Without shared storage**: Activities would fail because they can't access files created by other pods
 
 #### Platform-Specific Setup
@@ -277,7 +268,7 @@ Activities can run on different pods, so **shared storage is essential**. All wo
 
 #### Storage Requirements
 
-1. **Access Mode**: Must support ReadWriteMany (RWX) for parallel execution
+1. **Access Mode**: Must support ReadWriteMany (RWX) for shared access across worker pods
 2. **Mount Path**: Same path (`/workspace`) on all worker pods
 3. **Same Volume**: All pods mount the same volume/PVC
 4. **Performance**: Network storage (NFS) may have slightly higher latency
@@ -298,8 +289,8 @@ ScanConfig config = new ScanConfig();
 config.setCleanupAfterEachScan(true);  // Space-efficient mode
 config.setMaxWorkspaceSizeBytes(10L * 1024 * 1024 * 1024); // 10GB
 
-// Execution mode
-config.setExecuteScansInParallel(false); // false = sequential (default), true = parallel
+// Note: Parallel execution is not applicable since only one scan type (BlackDuck) is supported
+// The executeScansInParallel setting is kept for future extensibility but has no effect currently
 
 // Large repository optimization
 config.setCloneStrategy(CloneStrategy.SHALLOW_SINGLE_BRANCH); // Space-efficient cloning
@@ -403,19 +394,24 @@ config.setBlackduckProjectVersion("1.0.0");
 
 **Note**: The new `BlackDuckConfig` approach is recommended as it provides more control and supports hub-based scanning with dynamic hub URL determination.
 
-### Parallel Execution Configuration
+### Scan Execution
 
-To enable parallel execution for faster scans:
+Each workflow execution performs a single BlackDuck Detect scan:
 
 ```java
-config.setExecuteScansInParallel(true); // Enable parallel execution
+// Each ScanRequest handles one BlackDuck scan
+ScanRequest request = new ScanRequest(
+    "app-123",
+    "component-api",
+    "build-456",
+    ScanType.BLACKDUCK_DETECT,  // Single scan type per request
+    repositoryUrl,
+    branch,
+    commitSha
+);
 ```
 
-**Note**: Parallel execution uses the same repository clone, so it doesn't require additional space. However, it uses more CPU and memory resources. Ensure your Kubernetes pods have sufficient resources allocated.
-
-**Performance Comparison**:
-- **Sequential**: 3 scans × 5 min each = 15 minutes total
-- **Parallel**: max(5 min, 3 min, 10 min) = ~10 minutes total
+**Note**: The application currently supports only BlackDuck Detect scanning. The structure is designed to support additional scan types in the future, but parallel execution of multiple scan types is not currently implemented.
 
 ### Security Best Practices
 
@@ -479,11 +475,11 @@ Set up monitoring dashboards for:
 
 ## Additional Features
 
-### Parallel Scan Execution
-- ✅ **Implemented**: Execute multiple scans in parallel for faster results
-- Uses Temporal's Async API for concurrent execution
-- Same space usage as sequential (single repo clone)
-- See [PARALLEL_EXECUTION.md](PARALLEL_EXECUTION.md) for details
+### Single Scan Execution
+- ✅ **Implemented**: Each workflow executes a single BlackDuck Detect scan
+- Isolated workspace per scan for space efficiency
+- Configurable timeouts to prevent long-running scans from blocking the queue
+- See [BOTTLENECK_PREVENTION.md](BOTTLENECK_PREVENTION.md) for timeout configuration details
 
 ### External Storage
 - ✅ **Implemented**: Store scan results and reports to external storage
@@ -524,18 +520,17 @@ Set up monitoring dashboards for:
 - ✅ **Implemented**: Multiple strategies to prevent long-running scans from blocking the queue
 - Configurable activity timeouts: Set per-scan timeout limits
 - Workflow execution timeout: Set maximum workflow execution time
-- Separate task queues: Isolate long-running scans from normal scans
+- Scan-type specific task queues: BlackDuck scans use dedicated queue
 - Worker pool scaling: Scale workers horizontally to handle load
 - See [BOTTLENECK_PREVENTION.md](BOTTLENECK_PREVENTION.md) for details
 
 ## Documentation
 
 - [APPLICATION_STRUCTURE.md](APPLICATION_STRUCTURE.md): **Application structure** - appId, component, buildId, toolType structure and usage
-- [SCAN_CLIENTS.md](SCAN_CLIENTS.md): **Scan orchestrator clients** - How to use dedicated clients for each scan type
+- [SCAN_CLIENTS.md](SCAN_CLIENTS.md): **Scan orchestrator clients** - How to use dedicated BlackDuck scan client
 - [BLACKDUCK_IMPLEMENTATION.md](BLACKDUCK_IMPLEMENTATION.md): **BlackDuck scan implementation** - Hub URL determination, rapid scan support, and Detect script usage
 - [ARCHITECTURE_DIAGRAM.md](ARCHITECTURE_DIAGRAM.md): **Visual architecture diagrams** - routing, task picking, failure handling, and restart service
 - [ARCHITECTURE_EXPLANATION.md](ARCHITECTURE_EXPLANATION.md): How the application works - architecture, execution flow, and components
-- [PARALLEL_EXECUTION.md](PARALLEL_EXECUTION.md): How parallel scan execution works
 - [LARGE_REPO_STRATEGY.md](LARGE_REPO_STRATEGY.md): How large repositories are handled efficiently
 - [FAILURE_HANDLING.md](FAILURE_HANDLING.md): How failures are detected and handled
 - [BOTTLENECK_PREVENTION.md](BOTTLENECK_PREVENTION.md): How to prevent long-running scans from blocking the queue
