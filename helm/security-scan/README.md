@@ -39,8 +39,6 @@ storage:
     storageClassName: my-nfs-storage-class
 
 workers:
-  gitleaks:
-    replicas: 5
   blackduck:
     replicas: 3
 

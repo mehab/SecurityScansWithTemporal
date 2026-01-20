@@ -44,10 +44,10 @@ spec:
             - name: TEMPORAL_ADDRESS
               value: "temporal-service.security-scan.svc.cluster.local:7233"  # Adjust to your Temporal service
             # Task queues to monitor (comma-separated)
-            # Default: monitors all scan-type queues (GITLEAKS, BLACKDUCK, DEFAULT)
+            # Default: monitors all scan-type queues (BLACKDUCK, DEFAULT)
             # Can be overridden to monitor specific queues
             # - name: TASK_QUEUES
-            #   value: "SECURITY_SCAN_TASK_QUEUE_GITLEAKS,SECURITY_SCAN_TASK_QUEUE_BLACKDUCK"
+            #   value: "SECURITY_SCAN_TASK_QUEUE_BLACKDUCK"
             # Failure types to restart: STORAGE_FAILURE, NETWORK_FAILURE, RESOURCE_EXHAUSTION, 
             # DEPLOYMENT_FAILURE, or ALL (default: ALL to restart all restartable failures)
             - name: FAILURE_TYPE

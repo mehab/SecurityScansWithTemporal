@@ -16,30 +16,12 @@ When a scan is initiated, the system determines the task queue using this priori
 
 ### Available Queues
 
-- **`SECURITY_SCAN_TASK_QUEUE_GITLEAKS`**: Gitleaks scans (GITLEAKS_SECRETS, GITLEAKS_FILE_HASH)
 - **`SECURITY_SCAN_TASK_QUEUE_BLACKDUCK`**: BlackDuck Detect scans
 - **`SECURITY_SCAN_TASK_QUEUE_DEFAULT`**: Default fallback queue (used if scan type is not recognized)
 
 ## Usage Examples
 
-### Example 1: Gitleaks Scan (Automatic Routing)
-
-```java
-GitleaksScanClient client = new GitleaksScanClient();
-ScanRequest request = client.createScanRequest(
-    "app-123",
-    "api-component",
-    "build-456",
-    "https://github.com/example/repo.git",
-    "main",
-    "abc123def456"
-);
-
-// Automatically routes to SECURITY_SCAN_TASK_QUEUE_GITLEAKS
-String workflowId = client.submitScan(request);
-```
-
-### Example 2: BlackDuck Scan (Automatic Routing)
+### Example 1: BlackDuck Scan (Automatic Routing)
 
 ```java
 BlackDuckScanClient client = new BlackDuckScanClient();
@@ -75,21 +57,6 @@ request.setScanConfig(config);
 Each scan type has dedicated workers:
 
 ```yaml
-# Worker for Gitleaks
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: security-scan-worker-gitleaks
-spec:
-  template:
-    spec:
-      containers:
-      - name: worker
-        env:
-        - name: SCAN_TYPE
-          value: "GITLEAKS_SECRETS"
-        # Polls SECURITY_SCAN_TASK_QUEUE_GITLEAKS
----
 # Worker for BlackDuck
 apiVersion: apps/v1
 kind: Deployment
@@ -131,12 +98,6 @@ env:
 
 ## Queue Selection Rules
 
-### Gitleaks Queue
-
-A scan is routed to the Gitleaks queue if:
-- Tool type is `GITLEAKS_SECRETS` OR
-- Tool type is `GITLEAKS_FILE_HASH`
-
 ### BlackDuck Queue
 
 A scan is routed to the BlackDuck queue if:
@@ -159,10 +120,11 @@ String taskQueue = Shared.getTaskQueueForScanType(supportedScanType);
 
 // In Shared.java
 static String getTaskQueueForScanType(ScanType scanType) {
+    if (scanType == null) {
+        return SECURITY_SCAN_TASK_QUEUE_DEFAULT;
+    }
+    
     switch (scanType) {
-        case GITLEAKS_SECRETS:
-        case GITLEAKS_FILE_HASH:
-            return TASK_QUEUE_GITLEAKS;
         case BLACKDUCK_DETECT:
             return TASK_QUEUE_BLACKDUCK;
         default:
@@ -176,11 +138,11 @@ static String getTaskQueueForScanType(ScanType scanType) {
 Workers poll queues based on the `SCAN_TYPE` environment variable:
 
 - **Set to specific scan type**: Polls only that scan type's queue
-- **Not set**: Polls all scan-type queues (Gitleaks, BlackDuck, Default)
+- **Not set**: Polls all scan-type queues (BlackDuck, Default)
 
 ## Best Practices
 
-1. **Use Scan-Type Specific Clients**: Use `GitleaksScanClient` and `BlackDuckScanClient` for automatic routing
+1. **Use Scan-Type Specific Clients**: Use `BlackDuckScanClient` for automatic routing
 2. **Deploy Separate Workers**: For production, deploy separate workers for each scan type
 3. **Monitor Queue Depths**: Track queue depths to identify bottlenecks
 4. **Scale Workers Appropriately**: Scale workers based on scan type workload

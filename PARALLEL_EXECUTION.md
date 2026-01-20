@@ -1,180 +1,121 @@
-# Parallel Scan Execution
+# Scan Execution Model
 
 ## Overview
 
-Yes, all scan activities can be executed in parallel! The workflow now supports both **sequential** (default) and **parallel** execution modes.
+Currently, each workflow execution handles a single BlackDuck Detect scan. The structure is designed to support additional scan types in the future, which could then be executed in parallel.
 
-## How It Works
+## Current Execution Model
 
-### Sequential Execution (Default)
+### Single Scan Execution
 ```
 Time →
 ├─ Clone Repo
-├─ Gitleaks Secrets Scan ──────┐
-├─ Gitleaks File Hash Scan ────┤ Sequential
-└─ BlackDuck Detect Scan ──────┘
+└─ BlackDuck Detect Scan
 ```
 
 **Characteristics:**
 - Space-efficient: Uses single repository clone
-- Lower resource usage
-- Total time = sum of all scan times
-- Default mode
-
-### Parallel Execution
-```
-Time →
-├─ Clone Repo
-├─ Gitleaks Secrets Scan ──────┐
-├─ Gitleaks File Hash Scan ────┤ Parallel (simultaneous)
-└─ BlackDuck Detect Scan ──────┘
-```
-
-**Characteristics:**
-- Faster: All scans run simultaneously
-- Same space usage (single repo clone)
-- Total time ≈ longest scan time
-- Higher CPU/memory usage
+- One scan type per workflow execution
+- Simple and predictable execution model
+- Structure supports adding additional scan types in the future
 
 ## Implementation Details
 
-### Using Temporal's Async API
+### Current Implementation
 
-The parallel execution uses Temporal's `Async.function()` and `Promise` API:
+Each workflow execution performs a single scan:
 
 ```java
-// Start all scans asynchronously
-Map<ScanType, Promise<ScanResult>> promises = new HashMap<>();
-
-for (ScanType scanType : scanTypes) {
-    Promise<ScanResult> promise = Async.function(() -> {
-        return executeSingleScan(scanType, repoPath, config);
-    });
-    promises.put(scanType, promise);
-}
-
-// Wait for all to complete
-List<ScanResult> results = new ArrayList<>();
-for (ScanType scanType : scanTypes) {
-    Promise<ScanResult> promise = promises.get(scanType);
-    ScanResult result = promise.get(); // Blocks until complete
-    results.add(result);
-}
+// Execute single scan
+ScanResult scanResult = executeSingleScan(toolType, repoPath, request);
+summary.addScanResult(scanResult);
 ```
 
 ### Key Points
 
-1. **Same Repository**: All parallel scans operate on the same cloned repository
-2. **No Additional Space**: Parallel execution doesn't require multiple clones
-3. **Tool Compatibility**: Ensure scanning tools support concurrent execution:
-   - **Gitleaks**: ✅ Safe to run multiple instances on same repo (read-only)
-   - **BlackDuck Detect**: ⚠️ May create temporary files - test for conflicts
-4. **Resource Usage**: Parallel mode uses more CPU/memory but same disk space
+1. **Single Repository Clone**: One clone per workflow execution
+2. **Single Scan Type**: Each workflow handles one scan type (BlackDuck Detect)
+3. **Space Efficient**: Minimal space usage with single scan
+4. **Future Extensibility**: Structure supports adding parallel execution when multiple scan types are added
 
 ## Configuration
 
-### Enable Parallel Execution
+### Current Configuration
+
+No parallel execution configuration is needed since only one scan type is supported per workflow:
 
 ```java
 ScanConfig config = new ScanConfig();
-config.setExecuteScansInParallel(true);  // Enable parallel execution
-```
-
-### Default (Sequential)
-
-```java
-ScanConfig config = new ScanConfig();
-// executeScansInParallel defaults to false
+// Single scan execution - no parallel configuration needed
 ```
 
 ## Space Considerations
 
-### Parallel Execution Space Usage
-```
-/workspace/security-scans/{scan-id}/
-├── repo/                    (single clone - shared by all scans)
-├── gitleaks-report.json     (created by secrets scan)
-├── gitleaks-report.json     (created by file hash scan - may overwrite)
-└── blackduck-output/        (created by BlackDuck scan)
-```
-
-**Note**: If scans write to the same output files, you may need to:
-- Use unique output paths per scan type
-- Or accept that outputs may overwrite each other
-
-### Sequential Execution Space Usage
+### Current Space Usage
 ```
 /workspace/security-scans/{scan-id}/
 ├── repo/                    (single clone)
-├── gitleaks-report.json     (created sequentially)
-└── blackduck-output/        (created sequentially)
+└── blackduck-output/        (created by BlackDuck scan)
 ```
 
-## Performance Comparison
+**Space Requirements:**
+- Repository clone: Varies by repository size
+- BlackDuck output: ~100-500MB
+- Total: Repository size + ~500MB
 
-### Example: 3 Scans
-- Gitleaks Secrets: 5 minutes
-- Gitleaks File Hash: 3 minutes  
-- BlackDuck Detect: 10 minutes
+## Performance
 
-**Sequential Total**: 5 + 3 + 10 = **18 minutes**
+### Current Execution Time
+- BlackDuck Detect: Typically 10-30 minutes (varies by repository size)
 
-**Parallel Total**: max(5, 3, 10) = **~10 minutes** (saves 8 minutes)
+**Total Time**: Single scan execution time
 
-## When to Use Parallel Execution
+## Future: Parallel Execution
 
-### ✅ Use Parallel When:
+When additional scan types are added in the future, parallel execution may be beneficial:
+
+### ✅ Consider Parallel When:
+- Multiple scan types are needed for the same build
 - Speed is critical
 - Sufficient CPU/memory available
 - Scanning tools are confirmed to work concurrently
-- Repository is read-only during scans
 
 ### ❌ Use Sequential When:
 - Limited CPU/memory resources
 - Scanning tools have file locking issues
 - Need to minimize resource usage
-- Space is extremely constrained (though parallel doesn't use more space)
 
 ## Tool-Specific Considerations
 
-### Gitleaks
-- ✅ **Safe for parallel**: Read-only operations
-- Multiple instances can scan the same repo simultaneously
-- Output files may conflict - use unique report paths
-
 ### BlackDuck Detect
-- ⚠️ **Test first**: May create temporary files/caches
-- Check if multiple instances conflict
-- Consider using different output directories
+- Creates temporary files and caches during scan
+- Output directory: `blackduck-output/`
+- Single instance per workflow execution
 
 ## Recommendations
 
-1. **Default to Sequential**: More predictable, lower resource usage
-2. **Test Parallel First**: Verify tools work concurrently in your environment
-3. **Monitor Resources**: Watch CPU/memory when using parallel mode
-4. **Unique Output Paths**: Configure each scan to write to unique locations
+1. **Current Model**: Single scan per workflow is simple and predictable
+2. **Future Planning**: Structure supports adding parallel execution when multiple scan types are added
+3. **Monitor Resources**: Watch CPU/memory usage during scans
+4. **Output Management**: BlackDuck output is stored in dedicated directory
 
 ## Example Configuration
 
 ```java
 ScanConfig config = new ScanConfig();
 
-// Enable parallel for faster execution
-config.setExecuteScansInParallel(true);
+// Configure BlackDuck scan settings
+config.setBlackduckApiToken("token");
+config.setBlackduckUrl("https://blackduck.example.com");
 
-// Still cleanup after all scans complete
-config.setCleanupAfterEachScan(true);
-
-// Configure unique output paths to avoid conflicts
-config.setGitleaksConfigPath("/path/to/config.toml");
-// (In activity implementation, use unique report paths per scan type)
+// Single scan execution - no parallel configuration needed
 ```
 
 ## Future Enhancements
 
-Potential improvements:
+When additional scan types are added:
+- **Parallel Execution**: Run multiple scan types simultaneously
 - **Hybrid Mode**: Run compatible scans in parallel, others sequentially
 - **Dynamic Parallelism**: Adjust based on available resources
 - **Output Isolation**: Automatic unique output paths per scan type
-- **Conflict Detection**: Detect and handle tool conflicts automatically
 

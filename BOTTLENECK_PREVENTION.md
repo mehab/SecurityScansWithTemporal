@@ -64,18 +64,12 @@ WorkflowOptions options = WorkflowOptions.newBuilder()
 ### 3. Scan-Type Based Queue Separation
 
 The system automatically routes scans to appropriate task queues based on scan type (tool type):
-- **Gitleaks scans** → `SECURITY_SCAN_TASK_QUEUE_GITLEAKS`
 - **BlackDuck scans** → `SECURITY_SCAN_TASK_QUEUE_BLACKDUCK`
 - **Explicit setting**: Manually set queue in config
 
 **Automatic Queue Selection**:
 
 ```java
-// Gitleaks scans automatically route to GITLEAKS queue
-GitleaksScanClient gitleaksClient = new GitleaksScanClient();
-ScanRequest gitleaksRequest = gitleaksClient.createScanRequest(...);
-gitleaksClient.submitScan(gitleaksRequest);  // Routes to SECURITY_SCAN_TASK_QUEUE_GITLEAKS
-
 // BlackDuck scans automatically route to BLACKDUCK queue
 BlackDuckScanClient bdClient = new BlackDuckScanClient();
 ScanRequest bdRequest = bdClient.createScanRequest(...);
@@ -92,7 +86,6 @@ config.setTaskQueue("CUSTOM_QUEUE_NAME");
 3. Default: Fallback queue (only if scan type is not recognized)
 
 **Task Queue Options** (defined in `Shared.java`):
-- `SECURITY_SCAN_TASK_QUEUE_GITLEAKS`: For Gitleaks scans
 - `SECURITY_SCAN_TASK_QUEUE_BLACKDUCK`: For BlackDuck scans
 - `SECURITY_SCAN_TASK_QUEUE_DEFAULT`: Default fallback queue
 
@@ -101,21 +94,6 @@ config.setTaskQueue("CUSTOM_QUEUE_NAME");
 Deploy separate workers for each scan type:
 
 ```yaml
-# Worker for Gitleaks scans
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: security-scan-worker-gitleaks
-spec:
-  replicas: 5
-  template:
-    spec:
-      containers:
-      - name: worker
-        env:
-        - name: SCAN_TYPE
-          value: "GITLEAKS_SECRETS"  # Polls SECURITY_SCAN_TASK_QUEUE_GITLEAKS
----
 # Worker for BlackDuck scans
 apiVersion: apps/v1
 kind: Deployment
@@ -252,12 +230,10 @@ ScanConfig config = new ScanConfig();
 config.setScanTimeoutSeconds(900); // 15 minutes
 config.setWorkflowTimeoutSeconds(3600); // 1 hour
 
-// Use scan-type specific clients for automatic queue routing
-GitleaksScanClient gitleaksClient = new GitleaksScanClient();
+// Use scan-type specific client for automatic queue routing
 BlackDuckScanClient bdClient = new BlackDuckScanClient();
 
-// Each client automatically routes to its dedicated queue
-// Gitleaks → SECURITY_SCAN_TASK_QUEUE_GITLEAKS
+// Client automatically routes to its dedicated queue
 // BlackDuck → SECURITY_SCAN_TASK_QUEUE_BLACKDUCK
 ```
 
@@ -294,7 +270,7 @@ Set up alerts for:
 
 ```java
 // Use scan-type specific client for automatic queue routing
-GitleaksScanClient client = new GitleaksScanClient();
+BlackDuckScanClient client = new BlackDuckScanClient();
 
 ScanConfig config = new ScanConfig();
 
@@ -315,7 +291,7 @@ client.submitScan(request);
 ```
 
 **Result**:
-- Scan runs in scan-type specific queue (GITLEAKS queue, isolated from BlackDuck scans)
+- Scan runs in scan-type specific queue (BlackDuck queue)
 - Fails after 30 minutes if scan tool is stuck
 - Workflow fails after 90 minutes if workflow is stuck
 - Faster scan due to space-efficient cloning

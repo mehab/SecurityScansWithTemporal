@@ -20,7 +20,7 @@ When scanning a 4GB repository with limited PVC storage (e.g., 10GB), we need to
 Full Clone:          4GB (repo) + 1-2GB (git history) = ~6GB
 Shallow Clone:       4GB (repo) + 0.1GB (minimal history) = ~4.1GB
 Sparse Checkout:     1-2GB (only needed paths) + 0.1GB = ~1-2GB
-CLI Tools:           ~130MB (Gitleaks + BlackDuck JAR)
+CLI Tools:           ~100MB (BlackDuck Detect JAR)
 Scan Outputs:        ~100-500MB (reports, logs)
 Temporary Files:     ~200MB
 Total (Shallow):     ~4.5GB
@@ -291,13 +291,13 @@ if (repoSize > 2GB) {
 ### Scenario
 - Repository: 4GB
 - PVC Limit: 10GB
-- Scans: Gitleaks Secrets, Gitleaks File Hash, BlackDuck Detect
+- Scans: BlackDuck Detect
 
 ### Configuration
 ```java
 ScanRequest request = new ScanRequest("scan-123", repoUrl, "main", null);
-request.addScanType(ScanType.GITLEAKS_SECRETS);
-request.addScanType(ScanType.GITLEAKS_FILE_HASH);
+// Single scan type per request
+request.setToolType(ScanType.BLACKDUCK_DETECT);
 request.addScanType(ScanType.BLACKDUCK_DETECT);
 
 ScanConfig config = new ScanConfig();

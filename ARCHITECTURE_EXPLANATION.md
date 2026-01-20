@@ -47,7 +47,6 @@ This document explains how the security scanning application works with Temporal
 │  │  Workflow: SecurityScanWorkflowImpl                   │   │
 │  │  Activities:                                         │   │
 │  │    - RepositoryActivityImpl                          │   │
-│  │    - GitleaksScanActivityImpl                        │   │
 │  │    - BlackDuckScanActivityImpl                        │   │
 │  │    - StorageActivityImpl                              │   │
 │  └──────────────────────────────────────────────────────┘   │
@@ -69,7 +68,6 @@ This document explains how the security scanning application works with Temporal
 /workspace/security-scans/
   ├── scan-1234567890/
   │   ├── repo/              (cloned repository)
-  │   ├── gitleaks-report.json
   │   └── blackduck-output/
   └── scan-9876543210/
       └── repo/
@@ -152,21 +150,13 @@ Temporal Service                    Worker Pod
 
 ```java
 public ScanSummary executeScans(ScanRequest request) {
-    // Step 0: Update tools (if needed)
-    updateGitleaksIfNeeded(config);
-    
     // Step 1: Clone repository
     repoPath = repositoryActivity.cloneRepository(request);
     // ↑ This is an activity call - workflow suspends here
     
-    // Step 2: Execute scans
-    if (executeInParallel) {
-        scanResults = executeScansInParallel(...);
-        // ↑ Multiple activity calls in parallel
-    } else {
-        scanResults = executeScansSequentially(...);
-        // ↑ Activity calls one after another
-    }
+    // Step 2: Execute BlackDuck Detect scan
+    scanResult = blackduckActivity.scanSignatures(repoPath, request);
+    // ↑ Activity call - workflow suspends here
     
     // Step 3: Store results
     storageActivity.storeScanResults(...);
@@ -217,53 +207,32 @@ public String cloneRepository(ScanRequest request) {
 **What Happens**:
 1. Activity runs on **worker pod** (not Temporal Service)
 2. Can access **PVC storage** (mounted at `/workspace`)
-3. Can execute **external commands** (git, gitleaks, etc.)
+3. Can execute **external commands** (git, BlackDuck Detect, etc.)
 4. Sends **heartbeats** to Temporal Service (keeps activity alive)
 5. Returns result to Temporal Service
 6. Temporal Service **resumes workflow** with result
 
-## Parallel Execution
+## Execution Model
 
-### How Parallel Scans Work
+### Single Scan Execution
 
-```java
-// In SecurityScanWorkflowImpl
-private List<ScanResult> executeScansInParallel(...) {
-    Map<ScanType, Promise<ScanResult>> promises = new HashMap<>();
-    
-    // Start all scans asynchronously
-    for (ScanType scanType : scanTypes) {
-        Promise<ScanResult> promise = Async.function(() -> 
-            executeSingleScanWithErrorHandling(scanType, repoPath, config)
-        );
-        promises.put(scanType, promise);
-    }
-    
-    // Wait for all to complete
-    List<ScanResult> results = new ArrayList<>();
-    for (ScanType scanType : scanTypes) {
-        results.add(promises.get(scanType).get()); // Blocks until complete
-    }
-    
-    return results;
-}
-```
+Currently, each workflow execution handles a single BlackDuck Detect scan. The structure is designed to support additional scan types in the future.
 
 **What Happens**:
-1. Workflow creates multiple **activity tasks** simultaneously
-2. Temporal Service distributes tasks to **available workers**
-3. Multiple worker pods can execute activities **in parallel**
-4. All activities read from **same repository** on shared PVC
-5. Workflow waits for **all activities** to complete
-6. Results are collected and returned
+1. Workflow creates a single **activity task** for BlackDuck scan
+2. Temporal Service distributes task to **available worker**
+3. Worker pod executes BlackDuck Detect scan activity
+4. Activity reads from **repository** on shared PVC
+5. Workflow waits for **activity** to complete
+6. Result is collected and returned
 
-**Key Point**: Parallel execution uses **same repository clone** (no additional space), but activities run on **different worker pods** (if available).
+**Key Point**: Single scan execution uses **one repository clone** per workflow. The structure supports adding parallel execution of multiple scan types in the future.
 
 ## Fault Tolerance
 
 ### Pod Failure During Activity
 
-**Scenario**: Worker pod crashes while executing `gitleaksActivity.scanSecrets()`
+**Scenario**: Worker pod crashes while executing `blackduckActivity.scanSignatures()`
 
 **What Happens**:
 1. Temporal Service detects missing heartbeat
@@ -300,7 +269,7 @@ long availableSpace = getAvailableSpace(workspacePath);
 
 // Calculate required space:
 long estimatedRepoSize = estimateRepositorySize(request, config);
-long cliToolsSize = Shared.TOTAL_CLI_TOOLS_SIZE; // ~180MB
+long cliToolsSize = Shared.TOTAL_CLI_TOOLS_SIZE; // ~100MB (BlackDuck Detect)
 long scanOutputsSize = 500L * 1024 * 1024; // ~500MB
 long tempFilesSize = 200L * 1024 * 1024; // ~200MB
 long minRequiredSpace = estimatedRepoSize + cliToolsSize + 
@@ -314,7 +283,7 @@ if (availableSpace < minRequiredSpace) {
 
 **Space Calculation Includes**:
 - Repository clone size (estimated)
-- CLI tools (Gitleaks + BlackDuck Detect) - ~180MB
+- CLI tools (BlackDuck Detect) - ~100MB
 - Scan outputs (reports, logs) - ~500MB
 - Temporary files - ~200MB
 - Safety buffer (25% of max workspace size)
@@ -322,8 +291,8 @@ if (availableSpace < minRequiredSpace) {
 ### Cleanup Strategy
 
 **When Cleanup Happens**:
-1. **All scans successful** → Cleanup immediately
-2. **Any scan fails** → Cleanup deferred (repository retained)
+1. **Scan successful** → Cleanup immediately
+2. **Scan fails** → Cleanup deferred (repository retained)
 3. **Workflow exception** → Cleanup in error handler
 
 **Cleanup Process**:
@@ -408,7 +377,7 @@ OpenShift is Kubernetes-based, so the architecture is identical to Kubernetes de
 2. **Security Context**: OpenShift uses Security Context Constraints (SCCs):
    - Worker pods may need specific SCC permissions
    - May need to run as non-root user (OpenShift default)
-   - Ensure pods can execute git, gitleaks, and other CLI tools
+   - Ensure pods can execute git, BlackDuck Detect, and other CLI tools
 
 3. **Service Accounts**: 
    - Create dedicated ServiceAccount for workers
@@ -470,5 +439,5 @@ OpenShift is Kubernetes-based, so the architecture is identical to Kubernetes de
 - **Separation**: Temporal Service separate from workers (can scale independently)
 - **Scalability**: Add more worker pods to handle more scans
 - **Fault Tolerance**: Pod failures don't lose work (retries + shared storage)
-- **Space Efficiency**: Single repository clone for all scans (parallel or sequential)
+- **Space Efficiency**: Single repository clone per scan workflow
 

@@ -7,7 +7,7 @@ The security scanning application is structured to support multi-application, mu
 - **Application ID (appId)**: Identifies the application being scanned
 - **Component**: Component within the application
 - **Build ID (buildId)**: Unique build identifier for the component
-- **Tool Type**: Single scan type (Gitleaks, BlackDuck, etc.)
+- **Tool Type**: Single scan type (BlackDuck Detect)
 
 ## Scan Request Structure
 
@@ -18,7 +18,7 @@ ScanRequest request = new ScanRequest(
     "app-123",                    // Application ID
     "api-component",              // Component name
     "build-456",                  // Build ID (unique per component build)
-    ScanType.GITLEAKS_SECRETS,    // Tool type (single scan type)
+    ScanType.BLACKDUCK_DETECT,    // Tool type (single scan type)
     "https://github.com/example/repo.git",
     "main",                       // Branch
     "abc123def456"                // Commit SHA
@@ -36,8 +36,8 @@ Workflow ID is automatically generated as:
 - appId: `app-123`
 - component: `api-component`
 - buildId: `build-456`
-- toolType: `GITLEAKS_SECRETS`
-- **Workflow ID**: `app-123-api-component-build-456-gitleaks-secrets`
+- toolType: `BLACKDUCK_DETECT`
+- **Workflow ID**: `app-123-api-component-build-456-blackduck-detect`
 
 
 ## Queue Routing by Tool Type
@@ -46,8 +46,6 @@ Each scan type (tool type) is automatically routed to its dedicated task queue:
 
 | Tool Type | Task Queue |
 |-----------|------------|
-| `GITLEAKS_SECRETS` | `SECURITY_SCAN_TASK_QUEUE_GITLEAKS` |
-| `GITLEAKS_FILE_HASH` | `SECURITY_SCAN_TASK_QUEUE_GITLEAKS` |
 | `BLACKDUCK_DETECT` | `SECURITY_SCAN_TASK_QUEUE_BLACKDUCK` |
 
 ### Routing Priority
@@ -61,14 +59,6 @@ Each scan type (tool type) is automatically routed to its dedicated task queue:
 ### One Worker Per Scan Type (Recommended)
 
 Each scan type has its own dedicated worker deployment:
-
-**Gitleaks Worker:**
-```yaml
-env:
-- name: SCAN_TYPE
-  value: "GITLEAKS_SECRETS"  # Or GITLEAKS_FILE_HASH
-```
-→ Polls `SECURITY_SCAN_TASK_QUEUE_GITLEAKS`
 
 **BlackDuck Worker:**
 ```yaml
@@ -96,15 +86,15 @@ Each workflow execution handles **one scan type** (tool type):
 ### Example Flow
 
 ```
-Request: app-123, api-component, build-456, GITLEAKS_SECRETS
+Request: app-123, api-component, build-456, BLACKDUCK_DETECT
   ↓
-Workflow ID: app-123-api-component-build-456-gitleaks-secrets
+Workflow ID: app-123-api-component-build-456-blackduck-detect
   ↓
-Queue: SECURITY_SCAN_TASK_QUEUE_GITLEAKS
+Queue: SECURITY_SCAN_TASK_QUEUE_BLACKDUCK
   ↓
-Gitleaks Worker picks up task
+BlackDuck Worker picks up task
   ↓
-Execute: Clone → Gitleaks Scan → Store Results
+Execute: Clone → BlackDuck Scan → Store Results
 ```
 
 ## Multiple Scans for Same Build
@@ -112,23 +102,16 @@ Execute: Clone → Gitleaks Scan → Store Results
 If you need multiple scan types for the same build, submit **separate requests**:
 
 ```java
-// Request 1: Gitleaks scan
-ScanRequest gitleaksRequest = new ScanRequest(
-    "app-123", "api-component", "build-456",
-    ScanType.GITLEAKS_SECRETS, repoUrl, branch, commitSha
-);
-
-// Request 2: BlackDuck scan
+// BlackDuck scan request
 ScanRequest blackduckRequest = new ScanRequest(
     "app-123", "api-component", "build-456",
     ScanType.BLACKDUCK_DETECT, repoUrl, branch, commitSha
 );
 
-// Both workflows:
-// - Use same appId, component, buildId
-// - Different toolType → different workflow IDs
-// - Different queues → different workers
-// - Can run in parallel
+// Workflow:
+// - Uses appId, component, buildId
+// - Single toolType → single workflow ID
+// - Routes to BlackDuck queue → BlackDuck workers
 ```
 
 ## Workspace Path
@@ -140,7 +123,7 @@ Workspace path is automatically generated:
 
 **Example:**
 ```
-/workspace/security-scans/app-123-api-component-build-456-gitleaks-secrets
+/workspace/security-scans/app-123-api-component-build-456-blackduck-detect
 ```
 
 ## Scan Summary
@@ -151,38 +134,12 @@ The `ScanSummary` includes all structure fields:
 summary.getAppId();        // "app-123"
 summary.getComponent();    // "api-component"
 summary.getBuildId();     // "build-456"
-summary.getToolType();    // GITLEAKS_SECRETS
+summary.getToolType();    // BLACKDUCK_DETECT
 ```
 
 ## Usage Examples
 
-### Example 1: Submit Gitleaks Scan
-
-```java
-ScanRequest request = new ScanRequest(
-    "app-123",
-    "api-component",
-    "build-456",
-    ScanType.GITLEAKS_SECRETS,
-    "https://github.com/example/repo.git",
-    "main",
-    "abc123def456"
-);
-
-ScanConfig config = new ScanConfig();
-// Configure scan settings...
-request.setScanConfig(config);
-
-SecurityScanWorkflow workflow = client.newWorkflowStub(...);
-ScanSummary summary = workflow.executeScans(request);
-```
-
-**Result:**
-- Workflow ID: `app-123-api-component-build-456-gitleaks-secrets`
-- Queue: `SECURITY_SCAN_TASK_QUEUE_GITLEAKS`
-- Worker: Gitleaks worker picks up and executes
-
-### Example 2: Submit BlackDuck Scan
+### Example 1: Submit BlackDuck Scan
 
 ```java
 ScanRequest request = new ScanRequest(
@@ -201,12 +158,13 @@ ScanRequest request = new ScanRequest(
 - Queue: `SECURITY_SCAN_TASK_QUEUE_BLACKDUCK`
 - Worker: BlackDuck worker picks up and executes
 
-### Example 3: Multiple Scans for Same Build (Parallel)
+### Example 2: Multiple Scans for Same Build (Future)
 
+When additional scan types are added in the future, multiple scans for the same build can run in parallel:
 ```java
-// Both can run in parallel - different workflows, different queues
-submitScan("app-123", "api", "build-456", ScanType.GITLEAKS_SECRETS);
+// Future: When additional scan types are supported
 submitScan("app-123", "api", "build-456", ScanType.BLACKDUCK_DETECT);
+// Additional scan types can be added here
 ```
 
 
@@ -214,6 +172,6 @@ submitScan("app-123", "api", "build-456", ScanType.BLACKDUCK_DETECT);
 
 1. **Clear Workflow Identification**: Workflow ID includes all context (app, component, build, tool)
 2. **Dedicated Workers**: One worker per scan type for better isolation
-3. **Parallel Execution**: Multiple scan types for same build can run in parallel
-4. **Better Tracking**: Easy to identify scans by application, component, and build
-5. **Scalability**: Scale workers independently per scan type
+3. **Better Tracking**: Easy to identify scans by application, component, and build
+4. **Scalability**: Scale workers independently per scan type
+5. **Future Extensibility**: Structure supports adding additional scan types in the future

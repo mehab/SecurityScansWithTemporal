@@ -158,7 +158,7 @@ RetryOptions spaceRetryOptions = RetryOptions.newBuilder()
 
 **Health Checks**:
 - Storage mount exists and is accessible
-- CLI tools (git, gitleaks, detect.sh) available
+- CLI tools (git, BlackDuck Detect) available
 - Workspace directory can be created/accessed
 - Read/write permissions verified
 

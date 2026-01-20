@@ -49,46 +49,6 @@ String workflowId = client.submitScan(request);
 ScanSummary summary = client.submitScanAndWait(request);
 ```
 
-### 2. GitleaksScanClient
-
-Dedicated client for Gitleaks scans (secrets or file hash).
-
-**Features:**
-- Supports `GITLEAKS_SECRETS` and `GITLEAKS_FILE_HASH`
-- Routes to `SECURITY_SCAN_TASK_QUEUE_GITLEAKS`
-- Can be configured for specific Gitleaks scan type
-
-**Usage:**
-
-```java
-// Create client for secrets scanning (default)
-GitleaksScanClient client = new GitleaksScanClient("temporal-service:7233");
-
-// Or specify scan type explicitly
-GitleaksScanClient secretsClient = new GitleaksScanClient(
-    "temporal-service:7233", 
-    ScanType.GITLEAKS_SECRETS
-);
-
-GitleaksScanClient fileHashClient = new GitleaksScanClient(
-    "temporal-service:7233", 
-    ScanType.GITLEAKS_FILE_HASH
-);
-
-// Create scan request
-ScanRequest request = client.createScanRequest(
-    "app-123",
-    "api-component",
-    "build-456",
-    "https://github.com/example/repo.git",
-    "main",
-    "abc123def456"
-);
-
-// Submit scan
-String workflowId = client.submitScan(request);
-```
-
 ## Client Architecture
 
 ```
@@ -104,14 +64,13 @@ String workflowId = client.submitScan(request);
 └──────────────┬──────────────────────────┬───────────────┘
                │                          │
                │                          │
-    ┌──────────▼──────────┐   ┌──────────▼──────────┐
-    │ BlackDuckScanClient  │   │ GitleaksScanClient   │
-    │                      │   │                      │
-    │ • BLACKDUCK_DETECT   │   │ • GITLEAKS_SECRETS   │
-    │ • Routes to:         │   │ • GITLEAKS_FILE_HASH │
-    │   BLACKDUCK queue    │   │ • Routes to:         │
-    │                      │   │   GITLEAKS queue     │
-    └──────────────────────┘   └──────────────────────┘
+    ┌──────────▼──────────┐
+    │ BlackDuckScanClient  │
+    │                      │
+    │ • BLACKDUCK_DETECT   │
+    │ • Routes to:         │
+    │   BLACKDUCK queue    │
+    └──────────────────────┘
 ```
 
 ## Benefits
@@ -127,16 +86,14 @@ ScanRequest bdRequest = bdClient.createScanRequest(...);
 bdRequest.setToolType(ScanType.BLACKDUCK_DETECT); // Already set by createScanRequest
 bdClient.submitScan(bdRequest); // ✅ Works
 
-// ❌ Invalid - BlackDuck client rejects Gitleaks requests
-ScanRequest gitleaksRequest = new ScanRequest(..., ScanType.GITLEAKS_SECRETS, ...);
-bdClient.submitScan(gitleaksRequest); // ❌ Throws IllegalArgumentException
+// ❌ Invalid - BlackDuck client only accepts BlackDuck requests
+// Other scan types are not currently supported
 ```
 
 ### 2. Separation of Concerns
 
 Different teams/systems can use different clients:
 
-- **Security Team**: Uses `GitleaksScanClient` for secrets scanning
 - **Compliance Team**: Uses `BlackDuckScanClient` for license scanning
 - **CI/CD Pipeline**: Can use either client based on pipeline stage
 
@@ -157,19 +114,6 @@ spec:
     env:
     - name: TEMPORAL_ADDRESS
       value: "temporal-service:7233"
----
-# Deployment for Gitleaks orchestrator
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: gitleaks-scan-orchestrator
-spec:
-  containers:
-  - name: orchestrator
-    image: gitleaks-scan-client:latest
-    env:
-    - name: TEMPORAL_ADDRESS
-      value: "temporal-service:7233"
 ```
 
 ### 4. Queue Routing
@@ -177,7 +121,6 @@ spec:
 Each client automatically routes to the correct queue:
 
 - `BlackDuckScanClient` → `SECURITY_SCAN_TASK_QUEUE_BLACKDUCK`
-- `GitleaksScanClient` → `SECURITY_SCAN_TASK_QUEUE_GITLEAKS`
 
 This ensures requests are picked up by the appropriate workers.
 
@@ -218,7 +161,6 @@ public class PipelineScanTrigger {
 public class ScanController {
     
     private final BlackDuckScanClient blackDuckClient;
-    private final GitleaksScanClient gitleaksClient;
     
     @PostMapping("/blackduck")
     public ResponseEntity<String> triggerBlackDuckScan(@RequestBody ScanRequestDTO dto) {
@@ -235,20 +177,6 @@ public class ScanController {
         return ResponseEntity.ok(workflowId);
     }
     
-    @PostMapping("/gitleaks")
-    public ResponseEntity<String> triggerGitleaksScan(@RequestBody ScanRequestDTO dto) {
-        ScanRequest request = gitleaksClient.createScanRequest(
-            dto.getAppId(),
-            dto.getComponent(),
-            dto.getBuildId(),
-            dto.getRepositoryUrl(),
-            dto.getBranch(),
-            dto.getCommitSha()
-        );
-        
-        String workflowId = gitleaksClient.submitScan(request);
-        return ResponseEntity.ok(workflowId);
-    }
 }
 ```
 
@@ -260,8 +188,6 @@ public class ScanController {
 public class BuildEventListener {
     
     private final BlackDuckScanClient blackDuckClient;
-    private final GitleaksScanClient gitleaksClient;
-    
     @EventListener
     public void onBuildComplete(BuildCompleteEvent event) {
         // Trigger BlackDuck scan for license compliance
@@ -274,17 +200,6 @@ public class BuildEventListener {
             event.getCommitSha()
         );
         blackDuckClient.submitScan(bdRequest);
-        
-        // Trigger Gitleaks scan for secrets detection
-        ScanRequest gitleaksRequest = gitleaksClient.createScanRequest(
-            event.getAppId(),
-            event.getComponent(),
-            event.getBuildId(),
-            event.getRepositoryUrl(),
-            event.getBranch(),
-            event.getCommitSha()
-        );
-        gitleaksClient.submitScan(gitleaksRequest);
     }
 }
 ```
@@ -312,7 +227,7 @@ Clients validate scan types and throw `IllegalArgumentException` for invalid req
 ```java
 try {
     BlackDuckScanClient client = new BlackDuckScanClient();
-    ScanRequest request = new ScanRequest(..., ScanType.GITLEAKS_SECRETS, ...);
+    ScanRequest request = new ScanRequest(..., ScanType.BLACKDUCK_DETECT, ...);
     client.submitScan(request); // ❌ Throws IllegalArgumentException
 } catch (IllegalArgumentException e) {
     // Handle: "This client only supports BLACKDUCK_DETECT scans"
